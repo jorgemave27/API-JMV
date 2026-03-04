@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+
+# Env
+.env
+
+# Local DB
+*.db
+
+# Pytest
+.pytest_cache/
+
+# OS
+.DS_Store
