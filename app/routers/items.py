@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException , Query 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from app.core.deps import get_client_ip, log_client_ip
 from app.core.security import verify_api_key
-from app.core.deps import get_client_ip
 from app.database.database import get_db
 from app.models.item import Item
 from app.schemas.item import ItemCreate, ItemRead
+from app.dependencies import verificar_api_key
+
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -47,6 +47,7 @@ def listar_items(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
+    _ip: str = Depends(log_client_ip),
 ):
     offset = (page - 1) * page_size
     stmt = select(Item).offset(offset).limit(page_size)
@@ -85,4 +86,21 @@ def buscar_items(
 def mi_ip(ip: str = Depends(get_client_ip)):
     return {"ip": ip}
 
+
+@router.delete(
+    "/{item_id}",
+    summary="Eliminar item por ID",
+    dependencies=[Depends(verificar_api_key)],
+)
+def eliminar_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+):
+    item = db.get(Item, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+
+    db.delete(item)
+    db.commit()
+    return {"deleted": True, "id": item_id}
 
