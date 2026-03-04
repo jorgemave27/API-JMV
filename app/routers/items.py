@@ -30,6 +30,7 @@ def crear_item(
         description=payload.description,
         price=payload.price,
         sku=payload.sku,
+        codigo_sku=payload.codigo_sku,
     )
     db.add(item)
     db.commit()
