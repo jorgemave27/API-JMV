@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
 
@@ -14,10 +15,10 @@ class ItemCreate(BaseModel):
     price: float = Field(..., gt=0, description="Precio > 0")
     stock: int = Field(0, ge=0, description="Stock disponible (>=0)")
 
-    # Mantén sku porque tu modelo DB y router lo usan
+    # SKU legacy (sigue en tu modelo DB)
     sku: Optional[str] = Field(None, max_length=50, description="SKU libre (legacy)")
 
-    # Reto del manual
+    # SKU del reto (AB-1234)
     codigo_sku: Optional[str] = Field(
         None,
         description="SKU opcional con formato AB-1234",
@@ -46,7 +47,7 @@ class ItemCreate(BaseModel):
         if v is None:
             return None
         v = v.strip().upper()
-        if not re.match(SKU_RETO_REGEX, v):
+        if not SKU_RETO_REGEX.match(v):
             raise ValueError("codigo_sku inválido. Formato esperado: AB-1234")
         return v
 
@@ -61,3 +62,7 @@ class ItemRead(BaseModel):
     sku: Optional[str] = None
     codigo_sku: Optional[str] = None
     stock: int
+
+    #--Soft delete fields
+    eliminado: bool
+    eliminado_en: Optional[datetime] = None
