@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_ip, log_client_ip
@@ -13,6 +14,7 @@ from app.core.security import verify_api_key
 from app.database.database import get_db
 from app.models.item import Item
 from app.schemas.base import ApiResponse
+from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.pagination import PaginatedResponse
 
@@ -45,9 +47,193 @@ def crear_item(
         success=True,
         message="Item creado exitosamente",
         data=ItemRead.model_validate(item),
-        metadata={},  # el middleware meterá request_id aquí
+        metadata={},
     )
 
+
+# ------------------------
+# TAREA 12: BULK OPERATIONS
+# ------------------------
+
+@router.post(
+    "/bulk",
+    response_model=ApiResponse[list[ItemRead]],
+    summary="Crear items en lote (máx 100) (transaccional)",
+    dependencies=[Depends(verify_api_key)],
+)
+def bulk_create_items(
+    payload: BulkCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        objects: list[Item] = []
+        for it in payload.items:
+            objects.append(
+                Item(
+                    name=it.name,
+                    description=it.description,
+                    price=it.price,
+                    sku=it.sku,
+                    codigo_sku=it.codigo_sku,
+                    stock=it.stock,
+                )
+            )
+
+        db.add_all(objects)
+        db.commit()
+
+        for obj in objects:
+            db.refresh(obj)
+
+        return ApiResponse[list[ItemRead]](
+            success=True,
+            message="Items creados exitosamente (bulk)",
+            data=[ItemRead.model_validate(o) for o in objects],
+            metadata={},
+        )
+
+    except IntegrityError:
+        db.rollback()
+        return error_response(
+            status_code=400,
+            message="Error en bulk create: violación de integridad (ej. SKU duplicado). Se hizo rollback.",
+        )
+    except SQLAlchemyError as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error de base de datos en bulk create. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+    except Exception as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error inesperado en bulk create. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+
+
+@router.delete(
+    "/bulk",
+    response_model=ApiResponse[dict],
+    summary="Eliminar items en lote por IDs (soft delete) (máx 100)",
+    dependencies=[Depends(verify_api_key)],
+)
+def bulk_delete_items(
+    payload: BulkDelete,
+    db: Session = Depends(get_db),
+):
+    try:
+        now = datetime.now()
+
+        stmt = select(Item).where(Item.id.in_(payload.ids))
+        found = db.execute(stmt).scalars().all()
+        found_map = {i.id: i for i in found}
+
+        deleted = 0
+        not_found = 0
+
+        for item_id in payload.ids:
+            item = found_map.get(item_id)
+            if not item:
+                not_found += 1
+                continue
+
+            if not item.eliminado:
+                item.eliminado = True
+                item.eliminado_en = now
+                deleted += 1
+
+        db.commit()
+
+        return ApiResponse[dict](
+            success=True,
+            message="Bulk delete procesado",
+            data={"deleted": deleted, "not_found": not_found},
+            metadata={},
+        )
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error de base de datos en bulk delete. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+    except Exception as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error inesperado en bulk delete. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+
+
+@router.put(
+    "/bulk",
+    response_model=ApiResponse[dict],
+    summary="Actualizar 'disponible' en lote (interpreta disponible como stock>0)",
+    dependencies=[Depends(verify_api_key)],
+)
+def bulk_update_disponible(
+    payload: BulkUpdateDisponible,
+    db: Session = Depends(get_db),
+):
+    """
+    Como el modelo no tiene columna 'disponible', lo interpretamos así:
+      - disponible=True  => stock=1 (si estaba 0)
+      - disponible=False => stock=0
+
+    Retorna conteo updated vs not_found (no falla si algún id no existe).
+    """
+    try:
+        stmt = select(Item).where(Item.id.in_(payload.ids))
+        found = db.execute(stmt).scalars().all()
+        found_map = {i.id: i for i in found}
+
+        updated = 0
+        not_found = 0
+
+        for item_id in payload.ids:
+            item = found_map.get(item_id)
+            if not item:
+                not_found += 1
+                continue
+
+            new_stock = 1 if payload.disponible else 0
+            if item.stock != new_stock:
+                item.stock = new_stock
+                updated += 1
+
+        db.commit()
+
+        return ApiResponse[dict](
+            success=True,
+            message="Bulk update disponible procesado",
+            data={"updated": updated, "not_found": not_found},
+            metadata={},
+        )
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error de base de datos en bulk update disponible. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+    except Exception as e:
+        db.rollback()
+        return error_response(
+            status_code=500,
+            message="Error inesperado en bulk update disponible. Se hizo rollback.",
+            data={"error": str(e)},
+        )
+
+
+# ------------------------
+# LISTADOS (TAREA 10)
+# ------------------------
 
 @router.get(
     "/",
@@ -119,7 +305,7 @@ def listar_items(
         success=True,
         message="Items obtenidos exitosamente",
         data=paginated,
-        metadata={},  # middleware inyecta request_id
+        metadata={},
     )
 
 
