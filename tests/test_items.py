@@ -204,3 +204,50 @@ def test_codigo_sku_invalido_da_422(client):
     }
     r = client.post("/items/", headers={"X-API-Key": API_KEY}, json=payload)
     assert r.status_code == 422, r.text
+
+
+
+def test_soft_delete_oculta_en_listado_y_aparece_en_eliminados(client):
+#--TEST PARA SOFT DELETE (reto #08)
+    payload = {
+        "name": "caja soft",
+        "description": "test",
+        "price": 10.0,
+        "sku": "SOFT-100",
+        "codigo_sku": "AB-1234",
+        "stock": 1,
+    }
+    r = client.post("/items/", headers={"X-API-Key": API_KEY}, json=payload)
+    assert r.status_code in (200, 201), r.text
+    item_id = r.json()["id"]
+
+    r = client.delete(f"/items/{item_id}", headers={"X-API-Key": API_KEY})
+    assert r.status_code == 200, r.text
+
+    r = client.get("/items/?page=1&page_size=10", headers={"X-API-Key": API_KEY})
+    assert r.status_code == 200
+    assert len(r.json()) == 0
+
+    r = client.get("/items/eliminados?page=1&page_size=10", headers={"X-API-Key": API_KEY})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["eliminado"] is True
+    assert data[0]["eliminado_en"] is not None
+
+
+def test_restaurar_falla_si_item_no_esta_eliminado(client):
+    payload = {
+        "name": "caja activa",
+        "description": "test",
+        "price": 10.0,
+        "sku": "SOFT-101",
+        "codigo_sku": "AB-1234",
+        "stock": 1,
+    }
+    r = client.post("/items/", headers={"X-API-Key": API_KEY}, json=payload)
+    assert r.status_code in (200, 201), r.text
+    item_id = r.json()["id"]
+
+    r = client.post(f"/items/{item_id}/restaurar", headers={"X-API-Key": API_KEY})
+    assert r.status_code == 400, r.text
