@@ -15,14 +15,26 @@ from app.routers.items import router as items_router
 
 
 def create_app() -> FastAPI:
+    """
+    Factory principal de la aplicación FastAPI.
+
+    Responsabilidades:
+    - Inicializar logging
+    - Crear la app
+    - Registrar middlewares
+    - Crear tablas en desarrollo
+    - Registrar exception handlers
+    - Incluir routers
+    """
     setup_logging()
 
     app = FastAPI(
-        title=settings.app_name,
+        title=settings.APP_NAME,
         version="1.0.0",
         description="API JMV - FastAPI + SQLAlchemy + buenas prácticas",
     )
 
+    # Middlewares globales
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
 
@@ -35,6 +47,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """
+        Maneja errores de validación de Pydantic/FastAPI.
+        """
         errores = []
         for err in exc.errors():
             loc = " -> ".join(str(x) for x in err.get("loc", []))
@@ -55,6 +70,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
+        """
+        Maneja HTTPException genéricas con formato estandarizado.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -69,6 +87,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ItemNoEncontradoError)
     async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
+        """
+        Maneja la excepción personalizada cuando un item no existe.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -83,6 +104,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(StockInsuficienteError)
     async def stock_insuficiente_handler(request: Request, exc: StockInsuficienteError):
+        """
+        Maneja la excepción personalizada para conflictos de stock.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
