@@ -18,6 +18,7 @@ class Item(Base):
     codigo_sku = Column(String(20), nullable=True, index=True)
     stock = Column(Integer, nullable=False, default=0)
     eliminado = Column(Boolean, nullable=False, default=False, index=True)
-    eliminado_en = Column(DateTime, nullable=True)  
+    eliminado_en = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
 
