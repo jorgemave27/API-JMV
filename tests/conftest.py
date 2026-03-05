@@ -19,6 +19,8 @@ from app.main import app
 from app.database.database import Base, get_db
 
 API_KEY = "dev-secret-key-change-me"
+API_PREFIX = "/api/v1"
+ITEMS_BASE = f"{API_PREFIX}/items"
 
 
 def rand_sku(prefix: str = "CAJA") -> str:
@@ -101,7 +103,7 @@ def create_item(
         "codigo_sku": codigo_sku,
         "stock": stock,
     }
-    r = client.post("/items/", headers=auth_headers, json=payload)
+    r = client.post(f"{ITEMS_BASE}/", headers=auth_headers, json=payload)
     assert r.status_code in (200, 201), r.text
     request_id_from(r)
 
@@ -112,7 +114,7 @@ def create_item(
 
 
 def get_items_wrapped(client: TestClient, auth_headers: dict[str, str], query: str = "") -> dict:
-    url = "/items/" + (f"?{query}" if query else "")
+    url = f"{ITEMS_BASE}/" + (f"?{query}" if query else "")
     r = client.get(url, headers=auth_headers)
     assert r.status_code == 200, r.text
     request_id_from(r)
@@ -125,7 +127,7 @@ def get_items_wrapped(client: TestClient, auth_headers: dict[str, str], query: s
 
 
 def get_deleted_wrapped(client: TestClient, auth_headers: dict[str, str], query: str = "") -> dict:
-    url = "/items/eliminados" + (f"?{query}" if query else "")
+    url = f"{ITEMS_BASE}/eliminados" + (f"?{query}" if query else "")
     r = client.get(url, headers=auth_headers)
     assert r.status_code == 200, r.text
     request_id_from(r)

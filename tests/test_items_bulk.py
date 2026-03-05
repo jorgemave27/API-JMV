@@ -25,7 +25,7 @@ def test_bulk_create_ok(client, auth_headers):
         ]
     }
 
-    r = client.post("/items/bulk", headers=auth_headers, json=payload)
+    r = client.post("/api/v1/items/bulk", headers=auth_headers, json=payload)
     assert r.status_code in (200, 201), r.text
     request_id_from(r)
 
@@ -60,7 +60,7 @@ def test_bulk_create_rollback_si_sku_duplicado(client, auth_headers):
         ]
     }
 
-    r = client.post("/items/bulk", headers=auth_headers, json=payload)
+    r = client.post("/api/v1/items/bulk", headers=auth_headers, json=payload)
     assert r.status_code == 400, r.text
     request_id_from(r)
 
@@ -79,7 +79,7 @@ def test_bulk_delete_soft_delete(client, auth_headers):
 
     r = client.request(
         "DELETE",
-        "/items/bulk",
+        "/api/v1/items/bulk",
         headers=auth_headers,
         json={"ids": [a["id"], b["id"], 999999]},
     )
@@ -95,7 +95,8 @@ def test_bulk_delete_soft_delete(client, auth_headers):
 def test_bulk_put_disponible_false_actualiza_stock(client, auth_headers):
     """
     Este test valida el comportamiento del endpoint PUT /items/bulk
-    cuando se solicita disponible=False"""
+    cuando se solicita disponible=False
+    """
     # Creamos item A con stock 0
     a = create_item(
         client,
@@ -105,6 +106,7 @@ def test_bulk_put_disponible_false_actualiza_stock(client, auth_headers):
         stock=0,
         sku_prefix="UPD",
     )
+
     # Creamos item B con stock 5
     b = create_item(
         client,
@@ -117,13 +119,14 @@ def test_bulk_put_disponible_false_actualiza_stock(client, auth_headers):
 
     # Ejecutamos bulk update
     r = client.put(
-        "/items/bulk",
+        "/api/v1/items/bulk",
         headers=auth_headers,
         json={
             "ids": [a["id"], b["id"], 999999],  # incluimos un ID inexistente
             "disponible": False,
         },
     )
+
     # La operación debe ser exitosa
     assert r.status_code == 200, r.text
 
@@ -131,7 +134,6 @@ def test_bulk_put_disponible_false_actualiza_stock(client, auth_headers):
     request_id_from(r)
 
     body = unwrap(r.json())
-
     assert body["success"] is True
 
     # Debe detectar el ID inexistente
@@ -172,7 +174,7 @@ def test_bulk_put_disponible_true_con_stock_cero_da_409(client, auth_headers):
 
     # Intentamos marcar ambos como disponibles
     r = client.put(
-        "/items/bulk",
+        "/api/v1/items/bulk",
         headers=auth_headers,
         json={
             "ids": [a["id"], b["id"]],
@@ -187,7 +189,6 @@ def test_bulk_put_disponible_true_con_stock_cero_da_409(client, auth_headers):
     request_id_from(r)
 
     body = unwrap(r.json())
-
     assert body["success"] is False
 
     # Validamos el mensaje de error

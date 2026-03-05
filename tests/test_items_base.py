@@ -17,7 +17,7 @@ def test_create_item_requires_api_key(client):
         "codigo_sku": "AB-1234",
         "stock": 10,
     }
-    r = client.post("/items/", json=payload)
+    r = client.post("/api/v1/items/", json=payload)
     assert r.status_code == 401
 
 
@@ -30,7 +30,7 @@ def test_create_item_ok(client, auth_headers):
         "codigo_sku": "ZX-9999",
         "stock": 100,
     }
-    r = client.post("/items/", headers=auth_headers, json=payload)
+    r = client.post("/api/v1/items/", headers=auth_headers, json=payload)
     assert r.status_code in (200, 201), r.text
     request_id_from(r)
 
@@ -56,7 +56,7 @@ def test_soft_delete_oculta_en_listado_y_aparece_en_eliminados(client, auth_head
     created = create_item(client, auth_headers, name="caja soft", price=10.0, stock=1, sku_prefix="SOFT")
     item_id = created["id"]
 
-    r = client.delete(f"/items/{item_id}", headers=auth_headers)
+    r = client.delete(f"/api/v1/items/{item_id}", headers=auth_headers)
     assert r.status_code == 200, r.text
     request_id_from(r)
 
@@ -78,7 +78,7 @@ def test_restaurar_falla_si_item_no_esta_eliminado(client, auth_headers):
     created = create_item(client, auth_headers, name="caja activa", price=10.0, stock=1, sku_prefix="ACT")
     item_id = created["id"]
 
-    r = client.post(f"/items/{item_id}/restaurar", headers=auth_headers)
+    r = client.post(f"/api/v1/items/{item_id}/restaurar", headers=auth_headers)
     assert r.status_code == 400, r.text
     request_id_from(r)
 

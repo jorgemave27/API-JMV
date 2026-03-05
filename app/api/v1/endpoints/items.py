@@ -20,7 +20,7 @@ from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.pagination import PaginatedResponse
 
-router = APIRouter(prefix="/items", tags=["items"])
+router = APIRouter()
 
 # Logger específico de este módulo
 # Sigue la guía del task 14: un logger por archivo usando __name__

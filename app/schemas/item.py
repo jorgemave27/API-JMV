@@ -66,3 +66,6 @@ class ItemRead(BaseModel):
     #--Soft delete fields
     eliminado: bool
     eliminado_en: Optional[datetime] = None
+
+class ItemReadV2(ItemRead):
+    precio_con_iva: float

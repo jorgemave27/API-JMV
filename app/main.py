@@ -4,6 +4,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api.v1 import api_router_v1
+from app.api.v2 import api_router_v2
+from app.api.version import router as version_router
 from app.core.config import settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
@@ -11,7 +14,6 @@ from app.database.database import Base, engine
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.routers.health import router as health_router
-from app.routers.items import router as items_router
 
 
 def create_app() -> FastAPI:
@@ -24,7 +26,7 @@ def create_app() -> FastAPI:
     - Registrar middlewares
     - Crear tablas en desarrollo
     - Registrar exception handlers
-    - Incluir routers
+    - Incluir routers versionados y utilitarios
     """
     setup_logging()
 
@@ -34,11 +36,17 @@ def create_app() -> FastAPI:
         description="API JMV - FastAPI + SQLAlchemy + buenas prácticas",
     )
 
+    # ------------------------
     # Middlewares globales
+    # ------------------------
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
 
-    # Crea tablas (en producción usarías migraciones; para tareas iniciales sirve)
+    # ------------------------
+    # Base de datos
+    # ------------------------
+    # Crea tablas automáticamente en entorno local/desarrollo.
+    # En un entorno productivo esto normalmente se manejaría con migraciones.
     Base.metadata.create_all(bind=engine)
 
     # ------------------------
@@ -48,7 +56,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         """
-        Maneja errores de validación de Pydantic/FastAPI.
+        Maneja errores de validación de Pydantic/FastAPI
+        devolviendo una respuesta estandarizada.
         """
         errores = []
         for err in exc.errors():
@@ -125,9 +134,24 @@ def create_app() -> FastAPI:
             },
         )
 
+    # ------------------------
     # Routers
+    # ------------------------
+
+    # Healthcheck / utilitarios existentes
     app.include_router(health_router)
-    app.include_router(items_router)
+
+    # Endpoint informativo de versión de API
+    # Ejemplo: GET /api/version
+    app.include_router(version_router, prefix="/api")
+
+    # API versionada v1
+    # Ejemplo: /api/v1/items
+    app.include_router(api_router_v1, prefix="/api/v1")
+
+    # API versionada v2
+    # Ejemplo: /api/v2/items
+    app.include_router(api_router_v2, prefix="/api/v2")
 
     return app
 

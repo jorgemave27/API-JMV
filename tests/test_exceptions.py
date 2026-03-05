@@ -12,7 +12,7 @@ def test_validation_error_handler_formatea_422(client, auth_headers):
         "codigo_sku": "MAL",  # inválido
         "stock": 1,
     }
-    r = client.post("/items/", headers=auth_headers, json=payload)
+    r = client.post("/api/v1/items/", headers=auth_headers, json=payload)
     assert r.status_code == 422, r.text
     request_id_from(r)
 
@@ -23,7 +23,7 @@ def test_validation_error_handler_formatea_422(client, auth_headers):
 
 
 def test_item_no_encontrado_handler_devuelve_404_estandar(client, auth_headers):
-    r = client.delete("/items/999999", headers=auth_headers)
+    r = client.delete("/api/v1/items/999999", headers=auth_headers)
     assert r.status_code == 404, r.text
     request_id_from(r)
 
@@ -43,8 +43,7 @@ def test_stock_insuficiente_handler_devuelve_409(client, auth_headers):
         sku_prefix="STK",
     )
 
-    r = client.put(
-        "/items/bulk",
+    r = client.put("/api/v1/items/bulk",
         headers=auth_headers,
         json={"ids": [item["id"]], "disponible": True},
     )
