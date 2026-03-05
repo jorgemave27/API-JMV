@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException , Query 
+from fastapi import APIRouter, Depends, HTTPException , Query, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/items", tags=["items"])
     "/",
     response_model=ItemRead,
     summary="Crear item",
+    status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(verify_api_key)],
 )
 def crear_item(
