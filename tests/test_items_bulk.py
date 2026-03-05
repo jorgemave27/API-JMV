@@ -92,34 +92,107 @@ def test_bulk_delete_soft_delete(client, auth_headers):
     assert body["data"]["not_found"] == 1
 
 
-def test_bulk_put_disponible_actualiza_stock(client, auth_headers):
-    a = create_item(client, auth_headers, name="Caja Stock 0", price=10.0, stock=0, sku_prefix="UPD")
-    b = create_item(client, auth_headers, name="Caja Stock 5", price=10.0, stock=5, sku_prefix="UPD")
+def test_bulk_put_disponible_false_actualiza_stock(client, auth_headers):
+    """
+    Este test valida el comportamiento del endpoint PUT /items/bulk
+    cuando se solicita disponible=False"""
+    # Creamos item A con stock 0
+    a = create_item(
+        client,
+        auth_headers,
+        name="Caja Stock 0",
+        price=10.0,
+        stock=0,
+        sku_prefix="UPD",
+    )
+    # Creamos item B con stock 5
+    b = create_item(
+        client,
+        auth_headers,
+        name="Caja Stock 5",
+        price=10.0,
+        stock=5,
+        sku_prefix="UPD",
+    )
 
-    # disponible=false => stock=0 (a ya está en 0, b baja a 0)
-    r1 = client.put(
+    # Ejecutamos bulk update
+    r = client.put(
         "/items/bulk",
         headers=auth_headers,
-        json={"ids": [a["id"], b["id"], 999999], "disponible": False},
+        json={
+            "ids": [a["id"], b["id"], 999999],  # incluimos un ID inexistente
+            "disponible": False,
+        },
     )
-    assert r1.status_code == 200, r1.text
-    request_id_from(r1)
+    # La operación debe ser exitosa
+    assert r.status_code == 200, r.text
 
-    body1 = unwrap(r1.json())
-    assert body1["success"] is True
-    assert body1["data"]["not_found"] == 1
-    # b sí cambió, a no cambió (ya era 0)
-    assert body1["data"]["updated"] == 1
+    # Verificamos que el middleware haya generado request_id
+    request_id_from(r)
 
-    # disponible=true => stock=1 (a sube a 1, b sube a 1)
-    r2 = client.put(
+    body = unwrap(r.json())
+
+    assert body["success"] is True
+
+    # Debe detectar el ID inexistente
+    assert body["data"]["not_found"] == 1
+
+    # Solo B cambió (5 -> 0)
+    # A ya estaba en 0
+    assert body["data"]["updated"] == 1
+
+
+def test_bulk_put_disponible_true_con_stock_cero_da_409(client, auth_headers):
+    """
+    Este test valida la regla:
+
+    Si se intenta marcar disponible=True para un item con stock=0,
+    el sistema debe lanzar la excepción personalizada
+    """
+
+    # Creamos item A con stock 0
+    a = create_item(
+        client,
+        auth_headers,
+        name="Caja Stock 0",
+        price=10.0,
+        stock=0,
+        sku_prefix="UPD",
+    )
+
+    # Creamos item B con stock 5
+    b = create_item(
+        client,
+        auth_headers,
+        name="Caja Stock 5",
+        price=10.0,
+        stock=5,
+        sku_prefix="UPD",
+    )
+
+    # Intentamos marcar ambos como disponibles
+    r = client.put(
         "/items/bulk",
         headers=auth_headers,
-        json={"ids": [a["id"], b["id"]], "disponible": True},
+        json={
+            "ids": [a["id"], b["id"]],
+            "disponible": True,
+        },
     )
-    assert r2.status_code == 200, r2.text
-    request_id_from(r2)
 
-    body2 = unwrap(r2.json())
-    assert body2["success"] is True
-    assert body2["data"]["updated"] == 2
+    # Debe fallar con conflicto
+    assert r.status_code == 409, r.text
+
+    # Validamos request_id del middleware
+    request_id_from(r)
+
+    body = unwrap(r.json())
+
+    assert body["success"] is False
+
+    # Validamos el mensaje de error
+    assert "stock actual es 0" in body["message"].lower()
+
+    # Validamos que indique el item problemático
+    assert body["data"]["item_id"] == a["id"]
+    assert body["data"]["stock_actual"] == 0

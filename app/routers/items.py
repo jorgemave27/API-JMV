@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_ip, log_client_ip
+from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
 from app.core.security import verify_api_key
 from app.database.database import get_db
@@ -50,10 +51,6 @@ def crear_item(
         metadata={},
     )
 
-
-# ------------------------
-# TAREA 12: BULK OPERATIONS
-# ------------------------
 
 @router.post(
     "/bulk",
@@ -182,10 +179,11 @@ def bulk_update_disponible(
 ):
     """
     Como el modelo no tiene columna 'disponible', lo interpretamos así:
-      - disponible=True  => stock=1 (si estaba 0)
+      - disponible=True  => stock=1
       - disponible=False => stock=0
 
-    Retorna conteo updated vs not_found (no falla si algún id no existe).
+    Si se intenta marcar disponible=True y el item tiene stock=0,
+    se lanza StockInsuficienteError con status 409.
     """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
@@ -201,10 +199,23 @@ def bulk_update_disponible(
                 not_found += 1
                 continue
 
-            new_stock = 1 if payload.disponible else 0
-            if item.stock != new_stock:
-                item.stock = new_stock
-                updated += 1
+            if payload.disponible:
+                if item.stock == 0:
+                    raise StockInsuficienteError(item_id=item.id, stock_actual=item.stock)
+            else:
+                if item.stock != 0:
+                    item.stock = 0
+                    updated += 1
+
+        if payload.disponible:
+            # Si pasó validación, dejamos stock=1 en todos los encontrados que no estén ya así
+            for item_id in payload.ids:
+                item = found_map.get(item_id)
+                if not item:
+                    continue
+                if item.stock != 1:
+                    item.stock = 1
+                    updated += 1
 
         db.commit()
 
@@ -215,6 +226,9 @@ def bulk_update_disponible(
             metadata={},
         )
 
+    except StockInsuficienteError:
+        db.rollback()
+        raise
     except SQLAlchemyError as e:
         db.rollback()
         return error_response(
@@ -230,10 +244,6 @@ def bulk_update_disponible(
             data={"error": str(e)},
         )
 
-
-# ------------------------
-# LISTADOS (TAREA 10)
-# ------------------------
 
 @router.get(
     "/",
@@ -374,7 +384,7 @@ def eliminar_item(
 ):
     item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
     if not item:
-        return error_response(status_code=404, message="Item no encontrado")
+        raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
         return ApiResponse[dict](
@@ -409,7 +419,7 @@ def restaurar_item(
 ):
     item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
     if not item:
-        return error_response(status_code=404, message="Item no encontrado")
+        raise ItemNoEncontradoError(item_id)
 
     if not item.eliminado:
         return error_response(status_code=400, message="El item no está eliminado")
