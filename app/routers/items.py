@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException , Query 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_ip, log_client_ip
@@ -31,11 +31,12 @@ def crear_item(
         price=payload.price,
         sku=payload.sku,
         codigo_sku=payload.codigo_sku,
+        stock=payload.stock,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
-    return item
+    return ItemRead.model_validate(item)
 
 
 @router.get(
@@ -53,7 +54,7 @@ def listar_items(
     offset = (page - 1) * page_size
     stmt = select(Item).offset(offset).limit(page_size)
     items = db.execute(stmt).scalars().all()
-    return items
+    return [ItemRead.model_validate(i) for i in items]
 
 
 @router.get(
@@ -63,21 +64,45 @@ def listar_items(
     dependencies=[Depends(verify_api_key)],
 )
 def buscar_items(
-    q: str = Query(..., min_length=1, description="Texto a buscar"),
+    nombre: str = Query(..., min_length=1, description="Texto a buscar (parcial)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
     offset = (page - 1) * page_size
+
     stmt = (
         select(Item)
-        .where(Item.name.ilike(f"%{q}%"))
+        .where(Item.name.ilike(f"%{nombre}%"))
         .offset(offset)
         .limit(page_size)
     )
     items = db.execute(stmt).scalars().all()
     return items
 
+@router.get(
+    "/buscar/summary",
+    summary="Resumen de búsqueda: total y primer match",
+    dependencies=[Depends(verify_api_key)],
+)
+def buscar_summary(
+    nombre: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    # total (count)
+    total = db.query(Item).filter(Item.name.ilike(f"%{nombre}%")).count()
+
+    # first match
+    first_match = (
+        db.query(Item)
+        .filter(Item.name.ilike(f"%{nombre}%"))
+        .first()
+    )
+
+    return {
+        "total": total,
+        "first_match": ItemRead.model_validate(first_match).model_dump() if first_match else None,
+    }
 
 @router.get(
     "/ip",

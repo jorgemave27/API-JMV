@@ -13,6 +13,6 @@ class Item(Base):
     price = Column(Float, nullable=False)
     sku = Column(String(50), nullable=True, unique=True, index=True)
     codigo_sku = Column(String(20), nullable=True, index=True)
-
+    stock = Column(Integer, nullable=False, default=0)
 
 

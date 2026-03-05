@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
 
@@ -12,8 +12,9 @@ class ItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="Nombre del item")
     description: Optional[str] = Field(None, max_length=500)
     price: float = Field(..., gt=0, description="Precio > 0")
+    stock: int = Field(0, ge=0, description="Stock disponible (>=0)")
 
-    # Mantén sku porque tu modelo DB y router lo usan (y era parte de tu API original)
+    # Mantén sku porque tu modelo DB y router lo usan
     sku: Optional[str] = Field(None, max_length=50, description="SKU libre (legacy)")
 
     # Reto del manual
@@ -51,12 +52,12 @@ class ItemCreate(BaseModel):
 
 
 class ItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     description: Optional[str] = None
     price: float
     sku: Optional[str] = None
     codigo_sku: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    stock: int
