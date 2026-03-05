@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time
 from typing import Optional
 
@@ -21,6 +22,10 @@ from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter(prefix="/items", tags=["items"])
 
+# Logger específico de este módulo
+# Sigue la guía del task 14: un logger por archivo usando __name__
+logger = logging.getLogger(__name__)
+
 
 @router.post(
     "/",
@@ -32,6 +37,12 @@ def crear_item(
     payload: ItemCreate,
     db: Session = Depends(get_db),
 ):
+    """
+    Crea un item individual.
+
+    Logging aplicado:
+    - INFO cuando el item se crea exitosamente
+    """
     item = Item(
         name=payload.name,
         description=payload.description,
@@ -43,6 +54,9 @@ def crear_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+
+    # Log informativo del task 14
+    logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
     return ApiResponse[ItemRead](
         success=True,
@@ -62,8 +76,20 @@ def bulk_create_items(
     payload: BulkCreate,
     db: Session = Depends(get_db),
 ):
+    """
+    Crea múltiples items en una sola transacción.
+
+    Reglas:
+    - Si uno falla, se hace rollback de todos
+    - Se usa add_all + un solo commit
+    - Máximo 100 items validado desde el schema
+
+    Logging aplicado:
+    - ERROR con exc_info=True en fallos
+    """
     try:
         objects: list[Item] = []
+
         for it in payload.items:
             objects.append(
                 Item(
@@ -79,8 +105,11 @@ def bulk_create_items(
         db.add_all(objects)
         db.commit()
 
+        # Refresh para recuperar IDs y valores generados por la BD
         for obj in objects:
             db.refresh(obj)
+
+        logger.info(f"Bulk create completado: total_items={len(objects)}")
 
         return ApiResponse[list[ItemRead]](
             success=True,
@@ -89,14 +118,16 @@ def bulk_create_items(
             metadata={},
         )
 
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=400,
             message="Error en bulk create: violación de integridad (ej. SKU duplicado). Se hizo rollback.",
         )
     except SQLAlchemyError as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk create. Se hizo rollback.",
@@ -104,6 +135,7 @@ def bulk_create_items(
         )
     except Exception as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk create. Se hizo rollback.",
@@ -121,6 +153,17 @@ def bulk_delete_items(
     payload: BulkDelete,
     db: Session = Depends(get_db),
 ):
+    """
+    Elimina en lote usando soft delete.
+
+    Reglas:
+    - No borra físicamente
+    - Marca eliminado=True y eliminado_en=now()
+    - Si algún ID no existe, no falla; lo cuenta en not_found
+
+    Logging aplicado:
+    - ERROR con exc_info=True en fallos
+    """
     try:
         now = datetime.now()
 
@@ -133,6 +176,7 @@ def bulk_delete_items(
 
         for item_id in payload.ids:
             item = found_map.get(item_id)
+
             if not item:
                 not_found += 1
                 continue
@@ -144,6 +188,10 @@ def bulk_delete_items(
 
         db.commit()
 
+        logger.info(
+            f"Bulk delete procesado: deleted={deleted}, not_found={not_found}"
+        )
+
         return ApiResponse[dict](
             success=True,
             message="Bulk delete procesado",
@@ -153,6 +201,7 @@ def bulk_delete_items(
 
     except SQLAlchemyError as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk delete. Se hizo rollback.",
@@ -160,6 +209,7 @@ def bulk_delete_items(
         )
     except Exception as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk delete. Se hizo rollback.",
@@ -178,12 +228,18 @@ def bulk_update_disponible(
     db: Session = Depends(get_db),
 ):
     """
-    Como el modelo no tiene columna 'disponible', lo interpretamos así:
-      - disponible=True  => stock=1
-      - disponible=False => stock=0
+    Actualiza 'disponible' en lote.
 
-    Si se intenta marcar disponible=True y el item tiene stock=0,
-    se lanza StockInsuficienteError con status 409.
+    Como el modelo no tiene columna disponible, se interpreta así:
+    - disponible=True  => stock=1
+    - disponible=False => stock=0
+
+    Regla del reto task 13:
+    - Si se intenta marcar disponible=True y el item tiene stock=0,
+      se lanza StockInsuficienteError (HTTP 409 desde el handler global)
+
+    Logging aplicado:
+    - ERROR con exc_info=True en fallos
     """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
@@ -193,31 +249,42 @@ def bulk_update_disponible(
         updated = 0
         not_found = 0
 
+        # Primera pasada:
+        # validamos existencia y reglas de negocio antes de hacer commit
         for item_id in payload.ids:
             item = found_map.get(item_id)
+
             if not item:
                 not_found += 1
                 continue
 
             if payload.disponible:
+                # Regla del reto: no permitir "disponible=True" si el stock actual es 0
                 if item.stock == 0:
                     raise StockInsuficienteError(item_id=item.id, stock_actual=item.stock)
             else:
+                # disponible=False => stock=0
                 if item.stock != 0:
                     item.stock = 0
                     updated += 1
 
+        # Segunda pasada:
+        # solo si no hubo errores de stock, seteamos stock=1 para disponible=True
         if payload.disponible:
-            # Si pasó validación, dejamos stock=1 en todos los encontrados que no estén ya así
             for item_id in payload.ids:
                 item = found_map.get(item_id)
                 if not item:
                     continue
+
                 if item.stock != 1:
                     item.stock = 1
                     updated += 1
 
         db.commit()
+
+        logger.info(
+            f"Bulk update disponible procesado: updated={updated}, not_found={not_found}, disponible={payload.disponible}"
+        )
 
         return ApiResponse[dict](
             success=True,
@@ -228,9 +295,12 @@ def bulk_update_disponible(
 
     except StockInsuficienteError:
         db.rollback()
+        # El detalle del error ya lo maneja el exception handler global
+        logger.error("Error al procesar bulk update disponible: stock insuficiente", exc_info=True)
         raise
     except SQLAlchemyError as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk update disponible. Se hizo rollback.",
@@ -238,6 +308,7 @@ def bulk_update_disponible(
         )
     except Exception as e:
         db.rollback()
+        logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk update disponible. Se hizo rollback.",
@@ -270,6 +341,16 @@ def listar_items(
     db: Session = Depends(get_db),
     _ip: str = Depends(log_client_ip),
 ):
+    """
+    Lista items activos con:
+    - filtros opcionales
+    - búsqueda por nombre
+    - ordenamiento
+    - paginación
+
+    Nota:
+    - disponible se interpreta con base en stock
+    """
     stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
 
     if nombre:
@@ -288,9 +369,11 @@ def listar_items(
         dt = datetime.combine(creado_desde, time.min)
         stmt = stmt.where(Item.created_at >= dt)
 
+    # Total antes de paginar, pero ya con filtros aplicados
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = db.execute(count_stmt).scalar_one()
 
+    # Mapa de ordenamiento permitido
     order_map = {
         "precio_asc": Item.price.asc(),
         "precio_desc": Item.price.desc(),
@@ -299,6 +382,7 @@ def listar_items(
     }
     stmt = stmt.order_by(order_map[ordenar_por]) if ordenar_por else stmt.order_by(Item.id.asc())
 
+    # Paginación clásica offset/limit
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
 
@@ -330,6 +414,9 @@ def listar_eliminados(
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
     db: Session = Depends(get_db),
 ):
+    """
+    Lista items eliminados lógicamente (soft delete).
+    """
     stmt = select(Item).where(Item.eliminado == True)  # noqa: E712
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -364,6 +451,9 @@ def listar_eliminados(
     dependencies=[Depends(verify_api_key)],
 )
 def mi_ip(ip: str = Depends(get_client_ip)):
+    """
+    Endpoint demo para probar dependency injection de IP del cliente.
+    """
     return ApiResponse[dict](
         success=True,
         message="IP obtenida exitosamente",
@@ -382,11 +472,21 @@ def eliminar_item(
     item_id: int,
     db: Session = Depends(get_db),
 ):
+    """
+    Soft delete de un item individual.
+
+    Reglas:
+    - Si no existe => ItemNoEncontradoError
+    - Si ya estaba eliminado => warning log y respuesta idempotente
+    """
     item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
+
     if not item:
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
+        # Warning solicitado por el task 14
+        logger.warning(f"Intento de eliminar un item ya eliminado: id={item.id}")
         return ApiResponse[dict](
             success=True,
             message="Item ya estaba eliminado",
@@ -398,6 +498,8 @@ def eliminar_item(
     item.eliminado_en = datetime.now()
     db.add(item)
     db.commit()
+
+    logger.info(f"Item eliminado (soft delete): id={item.id}")
 
     return ApiResponse[dict](
         success=True,
@@ -417,7 +519,15 @@ def restaurar_item(
     item_id: int,
     db: Session = Depends(get_db),
 ):
+    """
+    Restaura un item previamente eliminado.
+
+    Reglas:
+    - Si no existe => ItemNoEncontradoError
+    - Si no está eliminado => error_response 400
+    """
     item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
+
     if not item:
         raise ItemNoEncontradoError(item_id)
 
@@ -429,6 +539,8 @@ def restaurar_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+
+    logger.info(f"Item restaurado: id={item.id}")
 
     return ApiResponse[ItemRead](
         success=True,

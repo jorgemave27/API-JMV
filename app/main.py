@@ -6,19 +6,24 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
+from app.core.logger import setup_logging
 from app.database.database import Base, engine
 from app.middlewares.request_id import RequestIdMiddleware
+from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.routers.health import router as health_router
 from app.routers.items import router as items_router
 
 
 def create_app() -> FastAPI:
+    setup_logging()
+
     app = FastAPI(
         title=settings.app_name,
         version="1.0.0",
         description="API JMV - FastAPI + SQLAlchemy + buenas prácticas",
     )
 
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
 
     # Crea tablas (en producción usarías migraciones; para tareas iniciales sirve)
