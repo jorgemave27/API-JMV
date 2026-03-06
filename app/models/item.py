@@ -57,6 +57,8 @@ class Item(Base):
 
     stock = Column(Integer, nullable=False, default=0)
 
+    proveedor= Column(String(255), nullable=True)
+
     # -------------------------
     # Relación con Categoría
     # -------------------------
