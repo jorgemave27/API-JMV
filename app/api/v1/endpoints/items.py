@@ -4,7 +4,7 @@ import logging
 from datetime import date, datetime, time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -20,6 +20,8 @@ from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.pagination import PaginatedResponse
+from app.models.movimiento_stock import MovimientoStock
+from app.schemas.movimiento_stock import TransferirStockRequest
 
 router = APIRouter()
 
@@ -573,3 +575,94 @@ def restaurar_item(
         data=ItemRead.model_validate(item),
         metadata={},
     )
+
+@router.post("/transferir-stock")
+def transferir_stock(
+    payload: TransferirStockRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Transfiere stock entre dos items de forma atómica.
+
+    La operación valida existencia, stock suficiente y registra auditoría
+    en la misma transacción.
+    """
+    if payload.item_origen_id == payload.item_destino_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El item origen y destino no pueden ser el mismo",
+        )
+
+    item_origen = db.get(Item, payload.item_origen_id)
+    if item_origen is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item origen no encontrado",
+        )
+
+    item_destino = db.get(Item, payload.item_destino_id)
+    if item_destino is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item destino no encontrado",
+        )
+
+    if item_origen.eliminado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El item origen está eliminado",
+        )
+
+    if item_destino.eliminado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El item destino está eliminado",
+        )
+
+    if item_origen.stock < payload.cantidad:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stock insuficiente en el item origen",
+        )
+
+    try:
+        with db.begin_nested():
+            item_origen.stock -= payload.cantidad
+
+            if payload.forzar_error:
+                raise RuntimeError("Error forzado para probar rollback")
+
+            item_destino.stock += payload.cantidad
+
+            movimiento = MovimientoStock(
+                item_origen_id=item_origen.id,
+                item_destino_id=item_destino.id,
+                cantidad=payload.cantidad,
+                usuario=payload.usuario,
+            )
+            db.add(movimiento)
+
+        db.commit()
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al transferir stock: {exc}",
+        ) from exc
+
+    db.refresh(item_origen)
+    db.refresh(item_destino)
+
+    return {
+        "success": True,
+        "message": "Transferencia de stock realizada exitosamente",
+        "data": {
+            "item_origen_id": item_origen.id,
+            "item_destino_id": item_destino.id,
+            "cantidad_transferida": payload.cantidad,
+            "stock_origen": item_origen.stock,
+            "stock_destino": item_destino.stock,
+            "usuario": payload.usuario,
+        },
+    }
