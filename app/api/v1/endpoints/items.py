@@ -24,6 +24,7 @@ from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
+from app.schemas.cursor_pagination import CursorPaginationResponse
 
 router = APIRouter()
 
@@ -420,6 +421,53 @@ def listar_items(
         metadata={},
     )
 
+@router.get(
+    "/cursor",
+    response_model=ApiResponse[CursorPaginationResponse],
+    summary="Listar items con paginación por cursor (keyset pagination)",
+    dependencies=[Depends(verify_api_key)],
+)
+def listar_items_cursor(
+    cursor: int = Query(0, ge=0, description="Último ID visto; 0 para iniciar"),
+    limite: int = Query(10, ge=1, le=100, description="Cantidad máxima de items por página"),
+    db: Session = Depends(get_db),
+):
+    """
+    Lista items activos usando paginación por cursor.
+
+    Reglas:
+    - Solo devuelve items con id > cursor
+    - Ordena por id ascendente
+    - Retorna next_cursor basado en el último item devuelto
+    - has_more indica si hay más resultados después de esta página
+    """
+    stmt = (
+        select(Item)
+        .where(Item.eliminado == False)  # noqa: E712
+        .where(Item.id > cursor)
+        .order_by(Item.id.asc())
+        .limit(limite + 1)
+    )
+
+    results = db.execute(stmt).scalars().all()
+
+    has_more = len(results) > limite
+    items = results[:limite]
+
+    next_cursor = items[-1].id if items else None
+
+    data = CursorPaginationResponse(
+        items=[ItemRead.model_validate(item) for item in items],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+    return ApiResponse[CursorPaginationResponse](
+        success=True,
+        message="Items obtenidos exitosamente con paginación por cursor",
+        data=data,
+        metadata={},
+    )
 
 @router.get(
     "/eliminados",
