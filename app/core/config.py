@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import os
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+APP_ENV = os.getenv("APP_ENV", "development")
 
 
 class Settings(BaseSettings):
@@ -10,7 +15,11 @@ class Settings(BaseSettings):
 
     Se cargan automáticamente desde:
     - Variables del sistema
-    - Archivo .env en la raíz del proyecto
+    - Archivo .env.<entorno> en la raíz del proyecto
+
+    Ejemplo:
+    - APP_ENV=development -> .env.development
+    - APP_ENV=production -> .env.production
 
     Beneficios:
     - Evita hardcodear secretos
@@ -29,14 +38,14 @@ class Settings(BaseSettings):
 
     # Información de la app
     APP_NAME: str = "API JMV"
-    APP_ENV: str = "local"
+    APP_ENV: str = APP_ENV
 
     # Paginación
     MAX_ITEMS_PER_PAGE: int = 100
 
     # Configuración de pydantic-settings
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=f".env.{APP_ENV}",
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

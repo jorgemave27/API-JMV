@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -19,22 +20,29 @@ class Base(DeclarativeBase):
     pass
 
 
-# Configuración especial para SQLite en desarrollo local.
-# SQLite requiere check_same_thread=False cuando se usa con FastAPI.
-connect_args: dict[str, bool] = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+database_url = settings.DATABASE_URL
+is_sqlite = database_url.startswith("sqlite")
+
+engine_kwargs: dict[str, Any] = {
+    "future": True,
+    "pool_pre_ping": True,
+}
+
+if is_sqlite:
+    # SQLite requiere check_same_thread=False cuando se usa con FastAPI.
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # Pool de conexiones recomendado para PostgreSQL en producción.
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
 
 
-# Engine principal de SQLAlchemy.
 engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args=connect_args,
-    future=True,
+    database_url,
+    **engine_kwargs,
 )
 
 
-# Fábrica de sesiones de base de datos.
 SessionLocal = sessionmaker(
     bind=engine,
     autocommit=False,
