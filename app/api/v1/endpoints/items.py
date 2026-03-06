@@ -14,14 +14,16 @@ from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
 from app.core.security import verify_api_key
 from app.database.database import get_db
+from app.dependencies import get_item_repo
 from app.models.categoria import Categoria
 from app.models.item import Item
+from app.models.movimiento_stock import MovimientoStock
+from app.repositories.item_repository import ItemRepository
 from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.item import ItemCreate, ItemRead
-from app.schemas.pagination import PaginatedResponse
-from app.models.movimiento_stock import MovimientoStock
 from app.schemas.movimiento_stock import TransferirStockRequest
+from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
 
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 def crear_item(
     payload: ItemCreate,
     db: Session = Depends(get_db),
+    repo: ItemRepository = Depends(get_item_repo),
 ):
     """
     Crea un item individual.
@@ -47,13 +50,15 @@ def crear_item(
     - Si se envía categoria_id, debe existir en la base de datos
     - Si no existe, retorna error 400
 
+    Repository pattern aplicado:
+    - La persistencia del item se delega al repository
+
     Logging aplicado:
     - INFO cuando el item se crea exitosamente
     """
     # -------------------------
     # Validación de categoría
     # -------------------------
-    # Si el cliente envía categoria_id, verificamos que exista
     if payload.categoria_id is not None:
         categoria = db.execute(
             select(Categoria).where(Categoria.id == payload.categoria_id)
@@ -78,11 +83,8 @@ def crear_item(
         categoria_id=payload.categoria_id,
     )
 
-    db.add(item)
-    db.commit()
-    db.refresh(item)
+    item = repo.create(item)
 
-    # Log informativo
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
     return ApiResponse[ItemRead](
@@ -132,7 +134,6 @@ def bulk_create_items(
         db.add_all(objects)
         db.commit()
 
-        # Refresh para recuperar IDs y valores generados por la BD
         for obj in objects:
             db.refresh(obj)
 
@@ -276,8 +277,6 @@ def bulk_update_disponible(
         updated = 0
         not_found = 0
 
-        # Primera pasada:
-        # validamos existencia y reglas de negocio antes de hacer commit
         for item_id in payload.ids:
             item = found_map.get(item_id)
 
@@ -286,17 +285,13 @@ def bulk_update_disponible(
                 continue
 
             if payload.disponible:
-                # Regla del reto: no permitir "disponible=True" si el stock actual es 0
                 if item.stock == 0:
                     raise StockInsuficienteError(item_id=item.id, stock_actual=item.stock)
             else:
-                # disponible=False => stock=0
                 if item.stock != 0:
                     item.stock = 0
                     updated += 1
 
-        # Segunda pasada:
-        # solo si no hubo errores de stock, seteamos stock=1 para disponible=True
         if payload.disponible:
             for item_id in payload.ids:
                 item = found_map.get(item_id)
@@ -322,7 +317,6 @@ def bulk_update_disponible(
 
     except StockInsuficienteError:
         db.rollback()
-        # El detalle del error ya lo maneja el exception handler global
         logger.error("Error al procesar bulk update disponible: stock insuficiente", exc_info=True)
         raise
     except SQLAlchemyError as e:
@@ -396,11 +390,9 @@ def listar_items(
         dt = datetime.combine(creado_desde, time.min)
         stmt = stmt.where(Item.created_at >= dt)
 
-    # Total antes de paginar, pero ya con filtros aplicados
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = db.execute(count_stmt).scalar_one()
 
-    # Mapa de ordenamiento permitido
     order_map = {
         "precio_asc": Item.price.asc(),
         "precio_desc": Item.price.desc(),
@@ -409,7 +401,6 @@ def listar_items(
     }
     stmt = stmt.order_by(order_map[ordenar_por]) if ordenar_por else stmt.order_by(Item.id.asc())
 
-    # Paginación clásica offset/limit
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
 
@@ -497,7 +488,7 @@ def mi_ip(ip: str = Depends(get_client_ip)):
 )
 def eliminar_item(
     item_id: int,
-    db: Session = Depends(get_db),
+    repo: ItemRepository = Depends(get_item_repo),
 ):
     """
     Soft delete de un item individual.
@@ -505,14 +496,16 @@ def eliminar_item(
     Reglas:
     - Si no existe => ItemNoEncontradoError
     - Si ya estaba eliminado => warning log y respuesta idempotente
+
+    Repository pattern aplicado:
+    - La obtención y eliminación del item se delegan al repository
     """
-    item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
+    item = repo.get_by_id(item_id)
 
     if not item:
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
-        # Warning solicitado por el task 14
         logger.warning(f"Intento de eliminar un item ya eliminado: id={item.id}")
         return ApiResponse[dict](
             success=True,
@@ -521,10 +514,7 @@ def eliminar_item(
             metadata={},
         )
 
-    item.eliminado = True
-    item.eliminado_en = datetime.now()
-    db.add(item)
-    db.commit()
+    repo.delete(item)
 
     logger.info(f"Item eliminado (soft delete): id={item.id}")
 
@@ -544,7 +534,7 @@ def eliminar_item(
 )
 def restaurar_item(
     item_id: int,
-    db: Session = Depends(get_db),
+    repo: ItemRepository = Depends(get_item_repo),
 ):
     """
     Restaura un item previamente eliminado.
@@ -552,8 +542,11 @@ def restaurar_item(
     Reglas:
     - Si no existe => ItemNoEncontradoError
     - Si no está eliminado => error_response 400
+
+    Repository pattern aplicado:
+    - La obtención y actualización del item se delegan al repository
     """
-    item = db.execute(select(Item).where(Item.id == item_id)).scalars().first()
+    item = repo.get_by_id(item_id)
 
     if not item:
         raise ItemNoEncontradoError(item_id)
@@ -563,9 +556,7 @@ def restaurar_item(
 
     item.eliminado = False
     item.eliminado_en = None
-    db.add(item)
-    db.commit()
-    db.refresh(item)
+    item = repo.update(item)
 
     logger.info(f"Item restaurado: id={item.id}")
 
@@ -576,16 +567,21 @@ def restaurar_item(
         metadata={},
     )
 
+
 @router.post("/transferir-stock")
 def transferir_stock(
     payload: TransferirStockRequest,
     db: Session = Depends(get_db),
+    repo: ItemRepository = Depends(get_item_repo),
 ):
     """
     Transfiere stock entre dos items de forma atómica.
 
     La operación valida existencia, stock suficiente y registra auditoría
     en la misma transacción.
+
+    Repository pattern aplicado:
+    - La obtención de items se hace mediante el repository
     """
     if payload.item_origen_id == payload.item_destino_id:
         raise HTTPException(
@@ -593,14 +589,14 @@ def transferir_stock(
             detail="El item origen y destino no pueden ser el mismo",
         )
 
-    item_origen = db.get(Item, payload.item_origen_id)
+    item_origen = repo.get_by_id(payload.item_origen_id)
     if item_origen is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item origen no encontrado",
         )
 
-    item_destino = db.get(Item, payload.item_destino_id)
+    item_destino = repo.get_by_id(payload.item_destino_id)
     if item_destino is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
