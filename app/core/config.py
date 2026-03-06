@@ -27,23 +27,43 @@ class Settings(BaseSettings):
     - Validación automática de tipos
     """
 
+    # -------------------------
     # Base de datos
+    # -------------------------
     DATABASE_URL: str
 
-    # Seguridad
+    # -------------------------
+    # Seguridad API Key
+    # -------------------------
     API_KEY: str
 
+    # -------------------------
+    # Seguridad JWT
+    # -------------------------
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # -------------------------
     # Logging
+    # -------------------------
     LOG_LEVEL: str = "INFO"
 
+    # -------------------------
     # Información de la app
+    # -------------------------
     APP_NAME: str = "API JMV"
     APP_ENV: str = APP_ENV
 
+    # -------------------------
     # Paginación
+    # -------------------------
     MAX_ITEMS_PER_PAGE: int = 100
 
+    # -------------------------
     # Configuración de pydantic-settings
+    # -------------------------
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
         env_file_encoding="utf-8",
@@ -61,6 +81,16 @@ class Settings(BaseSettings):
             raise ValueError("API_KEY debe tener al menos 16 caracteres")
         return value
 
+    @field_validator("JWT_SECRET_KEY")
+    @classmethod
+    def validate_jwt_secret_key_length(cls, value: str) -> str:
+        """
+        Valida que el secreto JWT tenga una longitud razonable.
+        """
+        if len(value) < 16:
+            raise ValueError("JWT_SECRET_KEY debe tener al menos 16 caracteres")
+        return value
+
     @field_validator("LOG_LEVEL")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
@@ -73,6 +103,40 @@ class Settings(BaseSettings):
         if value not in allowed:
             raise ValueError(f"LOG_LEVEL debe ser uno de: {allowed}")
 
+        return value
+
+    @field_validator("JWT_ALGORITHM")
+    @classmethod
+    def validate_jwt_algorithm(cls, value: str) -> str:
+        """
+        Valida el algoritmo JWT permitido para este proyecto.
+        """
+        allowed = {"HS256"}
+        value = value.upper()
+
+        if value not in allowed:
+            raise ValueError(f"JWT_ALGORITHM debe ser uno de: {allowed}")
+
+        return value
+
+    @field_validator("ACCESS_TOKEN_EXPIRE_MINUTES")
+    @classmethod
+    def validate_access_token_expire_minutes(cls, value: int) -> int:
+        """
+        Valida que la expiración del access token sea positiva.
+        """
+        if value <= 0:
+            raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES debe ser mayor que 0")
+        return value
+
+    @field_validator("REFRESH_TOKEN_EXPIRE_DAYS")
+    @classmethod
+    def validate_refresh_token_expire_days(cls, value: int) -> int:
+        """
+        Valida que la expiración del refresh token sea positiva.
+        """
+        if value <= 0:
+            raise ValueError("REFRESH_TOKEN_EXPIRE_DAYS debe ser mayor que 0")
         return value
 
 

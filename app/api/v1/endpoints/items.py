@@ -12,11 +12,12 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
-from app.core.security import verify_api_key
+from app.core.security import verify_api_key, get_current_user
 from app.database.database import get_db
 from app.dependencies import get_item_repo
 from app.models.categoria import Categoria
 from app.models.item import Item
+from app.models.usuario import Usuario
 from app.models.movimiento_stock import MovimientoStock
 from app.repositories.item_repository import ItemRepository
 from app.schemas.base import ApiResponse
@@ -25,6 +26,7 @@ from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.cursor_pagination import CursorPaginationResponse
+
 
 router = APIRouter()
 
@@ -537,6 +539,7 @@ def mi_ip(ip: str = Depends(get_client_ip)):
 def eliminar_item(
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
+    current_user: Usuario = Depends(get_current_user),
 ):
     """
     Soft delete de un item individual.
@@ -554,7 +557,9 @@ def eliminar_item(
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
-        logger.warning(f"Intento de eliminar un item ya eliminado: id={item.id}")
+        logger.warning(
+            f"Intento de eliminar un item ya eliminado: id={item.id}, usuario={current_user.email}"
+        )
         return ApiResponse[dict](
             success=True,
             message="Item ya estaba eliminado",
@@ -564,7 +569,9 @@ def eliminar_item(
 
     repo.delete(item)
 
-    logger.info(f"Item eliminado (soft delete): id={item.id}")
+    logger.info(
+        f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"
+    )
 
     return ApiResponse[dict](
         success=True,
