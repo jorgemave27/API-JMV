@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Index
 from sqlalchemy.orm import relationship
 
 from app.database.database import Base
@@ -30,9 +30,37 @@ class Item(Base):
     Relaciones:
     - categoria_id: clave foránea hacia la tabla categorias
     - categoria: relación ORM hacia el modelo Categoria
+
+    ------------------------------------------------------------------
+    Índices de optimización (Tarea 20)
+    ------------------------------------------------------------------
+
+    index en name:
+        Optimiza consultas de búsqueda por nombre de producto.
+        Ejemplo:
+        SELECT * FROM items WHERE name = 'Caja Premium'
+
+    index en eliminado:
+        Optimiza consultas que filtran solo items activos.
+        Ejemplo:
+        SELECT * FROM items WHERE eliminado = false
+
+    índice compuesto (name, eliminado):
+        Optimiza búsquedas comunes en la API donde filtramos por nombre
+        pero solo queremos items activos.
+
+        Ejemplo:
+        SELECT * FROM items
+        WHERE name = 'Caja Premium'
+        AND eliminado = false
     """
 
     __tablename__ = "items"
+
+    # Índice compuesto para optimizar búsquedas frecuentes
+    __table_args__ = (
+        Index("ix_items_name_eliminado", "name", "eliminado"),
+    )
 
     # -------------------------
     # Identificación básica
@@ -57,7 +85,7 @@ class Item(Base):
 
     stock = Column(Integer, nullable=False, default=0)
 
-    proveedor= Column(String(255), nullable=True)
+    proveedor = Column(String(255), nullable=True)
 
     # -------------------------
     # Relación con Categoría
