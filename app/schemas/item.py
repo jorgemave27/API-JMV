@@ -6,10 +6,23 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.categoria import CategoriaResponse
+
 SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
 
 
 class ItemCreate(BaseModel):
+    """
+    Schema de entrada para crear un item.
+
+    Incluye validaciones de:
+    - nombre
+    - precio
+    - codigo_sku
+    - stock
+    - categoria_id opcional
+    """
+
     name: str = Field(..., min_length=1, max_length=200, description="Nombre del item")
     description: Optional[str] = Field(None, max_length=500)
     price: float = Field(..., gt=0, description="Precio > 0")
@@ -23,6 +36,13 @@ class ItemCreate(BaseModel):
         None,
         description="SKU opcional con formato AB-1234",
         examples=["AB-1234"],
+    )
+
+    # Relación opcional con categoría
+    categoria_id: Optional[int] = Field(
+        None,
+        ge=1,
+        description="ID de la categoría asociada",
     )
 
     @field_validator("name")
@@ -53,6 +73,15 @@ class ItemCreate(BaseModel):
 
 
 class ItemRead(BaseModel):
+    """
+    Schema de salida para items.
+
+    Incluye:
+    - datos principales del item
+    - soft delete
+    - categoría anidada opcional
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -62,10 +91,22 @@ class ItemRead(BaseModel):
     sku: Optional[str] = None
     codigo_sku: Optional[str] = None
     stock: int
+    categoria_id: Optional[int] = None
 
-    #--Soft delete fields
+    # Categoría anidada
+    categoria: Optional[CategoriaResponse] = None
+
+    # Soft delete fields
     eliminado: bool
     eliminado_en: Optional[datetime] = None
 
+
 class ItemReadV2(ItemRead):
+    """
+    Schema de salida para items en v2.
+
+    Extiende ItemRead agregando el campo calculado:
+    - precio_con_iva
+    """
+
     precio_con_iva: float

@@ -14,6 +14,7 @@ from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
 from app.core.security import verify_api_key
 from app.database.database import get_db
+from app.models.categoria import Categoria
 from app.models.item import Item
 from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
@@ -40,9 +41,31 @@ def crear_item(
     """
     Crea un item individual.
 
+    Validaciones:
+    - Si se envía categoria_id, debe existir en la base de datos
+    - Si no existe, retorna error 400
+
     Logging aplicado:
     - INFO cuando el item se crea exitosamente
     """
+    # -------------------------
+    # Validación de categoría
+    # -------------------------
+    # Si el cliente envía categoria_id, verificamos que exista
+    if payload.categoria_id is not None:
+        categoria = db.execute(
+            select(Categoria).where(Categoria.id == payload.categoria_id)
+        ).scalars().first()
+
+        if not categoria:
+            return error_response(
+                status_code=400,
+                message=f"La categoría con id={payload.categoria_id} no existe",
+            )
+
+    # -------------------------
+    # Creación del item
+    # -------------------------
     item = Item(
         name=payload.name,
         description=payload.description,
@@ -50,12 +73,14 @@ def crear_item(
         sku=payload.sku,
         codigo_sku=payload.codigo_sku,
         stock=payload.stock,
+        categoria_id=payload.categoria_id,
     )
+
     db.add(item)
     db.commit()
     db.refresh(item)
 
-    # Log informativo del task 14
+    # Log informativo
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
     return ApiResponse[ItemRead](

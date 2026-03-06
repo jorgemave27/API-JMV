@@ -13,6 +13,9 @@ from app.core.logger import setup_logging
 from app.database.database import Base, engine
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
+from app.models.categoria import Categoria
+from app.models.item import Item
+from app.routers.categorias import router as categorias_router
 from app.routers.health import router as health_router
 
 
@@ -47,6 +50,9 @@ def create_app() -> FastAPI:
     # ------------------------
     # Crea tablas automáticamente en entorno local/desarrollo.
     # En un entorno productivo esto normalmente se manejaría con migraciones.
+    #
+    # Importar los modelos asegura que SQLAlchemy los registre
+    # correctamente en Base.metadata antes de ejecutar create_all().
     Base.metadata.create_all(bind=engine)
 
     # ------------------------
@@ -140,6 +146,9 @@ def create_app() -> FastAPI:
 
     # Healthcheck / utilitarios existentes
     app.include_router(health_router)
+
+    # CRUD de categorías
+    app.include_router(categorias_router)
 
     # Endpoint informativo de versión de API
     # Ejemplo: GET /api/version

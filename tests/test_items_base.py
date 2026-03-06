@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from tests.conftest import create_item, get_deleted_wrapped, get_items_wrapped, request_id_from, unwrap, rand_sku
 
-
 def test_health_ok(client):
     r = client.get("/health")
     assert r.status_code == 200
@@ -85,3 +84,67 @@ def test_restaurar_falla_si_item_no_esta_eliminado(client, auth_headers):
     body = unwrap(r.json())
     assert body["success"] is False
     assert "no está eliminado" in body["message"].lower()
+
+def test_create_item_con_categoria_valida(client, auth_headers):
+    # Primero creamos una categoría válida
+    categoria_payload = {
+        "nombre": "Empaque",
+        "descripcion": "Material de empaque",
+    }
+
+    categoria_resp = client.post(
+        "/categorias/",
+        headers=auth_headers,
+        json=categoria_payload,
+    )
+    assert categoria_resp.status_code in (200, 201), categoria_resp.text
+    request_id_from(categoria_resp)
+
+    categoria_body = unwrap(categoria_resp.json())
+    assert categoria_body["success"] is True
+    categoria_id = categoria_body["data"]["id"]
+
+    # Luego creamos un item apuntando a esa categoría
+    item_payload = {
+        "name": "caja con categoria",
+        "description": "test relacion",
+        "price": 25.5,
+        "sku": rand_sku("CAT"),
+        "codigo_sku": "AB-1234",
+        "stock": 10,
+        "categoria_id": categoria_id,
+    }
+
+    r = client.post("/api/v1/items/", headers=auth_headers, json=item_payload)
+    assert r.status_code in (200, 201), r.text
+    request_id_from(r)
+
+    body = unwrap(r.json())
+    assert body["success"] is True
+
+    data = body["data"]
+    assert data["categoria_id"] == categoria_id
+    assert data["categoria"] is not None
+    assert data["categoria"]["id"] == categoria_id
+    assert data["categoria"]["nombre"] == "Empaque"
+
+
+def test_create_item_con_categoria_invalida_da_400(client, auth_headers):
+    payload = {
+        "name": "caja categoria invalida",
+        "description": "test error categoria",
+        "price": 25.5,
+        "sku": rand_sku("ERRCAT"),
+        "codigo_sku": "AB-1234",
+        "stock": 10,
+        "categoria_id": 999,
+    }
+
+    r = client.post("/api/v1/items/", headers=auth_headers, json=payload)
+    assert r.status_code == 400, r.text
+    request_id_from(r)
+
+    body = unwrap(r.json())
+    assert body["success"] is False
+    assert "no existe" in body["message"].lower()
+    assert "categoría" in body["message"].lower()
