@@ -15,8 +15,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.main import app
+from app.core.security import create_access_token, hash_password
 from app.database.database import Base, get_db
+from app.main import app
+from app.models.usuario import Usuario
 
 API_KEY = "dev-secret-key-change-me"
 API_PREFIX = "/api/v1"
@@ -62,9 +64,94 @@ def client(setup_db):
         yield c
 
 
+def _ensure_user(
+    TestingSessionLocal,
+    *,
+    email: str,
+    password: str,
+    rol: str,
+) -> str:
+    """
+    Crea o actualiza un usuario de prueba y devuelve un access token.
+    """
+    db = TestingSessionLocal()
+    try:
+        user = db.query(Usuario).filter(Usuario.email == email).first()
+
+        if user is None:
+            user = Usuario(
+                email=email,
+                hashed_password=hash_password(password),
+                activo=True,
+                rol=rol,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            user.hashed_password = hash_password(password)
+            user.activo = True
+            user.rol = rol
+            db.commit()
+            db.refresh(user)
+
+        token = create_access_token(user.email)
+        return token
+    finally:
+        db.close()
+
+
 @pytest.fixture()
-def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": API_KEY}
+def auth_headers(setup_db) -> dict[str, str]:
+    """
+    Headers de autenticación para la mayoría de tests de escritura.
+    Usa rol editor porque editor/admin pueden crear/actualizar.
+    """
+    token = _ensure_user(
+        setup_db,
+        email="editor@test.com",
+        password="Test123456",
+        rol="editor",
+    )
+    return {
+        "X-API-Key": API_KEY,
+        "Authorization": f"Bearer {token}",
+    }
+
+
+@pytest.fixture()
+def admin_auth_headers(setup_db) -> dict[str, str]:
+    """
+    Headers de autenticación con rol admin.
+    Útil para tests que requieren eliminar.
+    """
+    token = _ensure_user(
+        setup_db,
+        email="admin@test.com",
+        password="Test123456",
+        rol="admin",
+    )
+    return {
+        "X-API-Key": API_KEY,
+        "Authorization": f"Bearer {token}",
+    }
+
+
+@pytest.fixture()
+def lector_auth_headers(setup_db) -> dict[str, str]:
+    """
+    Headers con rol lector para tests RBAC.
+    """
+    token = _ensure_user(
+        setup_db,
+        email="lector@test.com",
+        password="Test123456",
+        rol="lector",
+    )
+    return {
+        "X-API-Key": API_KEY,
+        "Authorization": f"Bearer {token}",
+    }
 
 
 def unwrap(resp_json: dict) -> dict:

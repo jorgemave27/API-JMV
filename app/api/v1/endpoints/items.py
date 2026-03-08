@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
-from app.core.security import verify_api_key, get_current_user
+from app.core.security import verify_api_key, get_current_user, require_role
 from app.database.database import get_db
 from app.dependencies import get_item_repo
 from app.models.categoria import Categoria
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
     "/",
     response_model=ApiResponse[ItemRead],
     summary="Crear item",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def crear_item(
     payload: ItemCreate,
@@ -102,7 +102,7 @@ def crear_item(
     "/bulk",
     response_model=ApiResponse[list[ItemRead]],
     summary="Crear items en lote (máx 100) (transaccional)",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def bulk_create_items(
     payload: BulkCreate,
@@ -539,7 +539,7 @@ def mi_ip(ip: str = Depends(get_client_ip)):
 def eliminar_item(
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(require_role("admin")),
 ):
     """
     Soft delete de un item individual.
@@ -585,7 +585,7 @@ def eliminar_item(
     "/{item_id}/restaurar",
     response_model=ApiResponse[ItemRead],
     summary="Restaurar item eliminado (soft delete)",
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def restaurar_item(
     item_id: int,
@@ -623,7 +623,10 @@ def restaurar_item(
     )
 
 
-@router.post("/transferir-stock")
+@router.post(
+    "/transferir-stock",
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
+)
 def transferir_stock(
     payload: TransferirStockRequest,
     db: Session = Depends(get_db),

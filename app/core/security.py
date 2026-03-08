@@ -152,3 +152,27 @@ def get_current_user(
         )
 
     return user
+
+def require_role(*roles: str):
+    """
+    Dependency factory para validar que el usuario autenticado
+    tenga alguno de los roles permitidos.
+
+    Ejemplo:
+        Depends(require_role("admin"))
+        Depends(require_role("admin", "editor"))
+    """
+
+    def role_checker(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+        if current_user.rol not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"Permisos insuficientes. "
+                    f"Rol requerido: {', '.join(roles)}. "
+                    f"Rol actual: {current_user.rol}"
+                ),
+            )
+        return current_user
+
+    return role_checker

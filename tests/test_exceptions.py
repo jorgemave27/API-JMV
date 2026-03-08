@@ -22,8 +22,8 @@ def test_validation_error_handler_formatea_422(client, auth_headers):
     assert "errors" in body["data"]
 
 
-def test_item_no_encontrado_handler_devuelve_404_estandar(client, auth_headers):
-    r = client.delete("/api/v1/items/999999", headers=auth_headers)
+def test_item_no_encontrado_handler_devuelve_404_estandar(client, admin_auth_headers):
+    r = client.delete("/api/v1/items/999999", headers=admin_auth_headers)
     assert r.status_code == 404, r.text
     request_id_from(r)
 

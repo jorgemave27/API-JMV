@@ -73,14 +73,14 @@ def test_bulk_create_rollback_si_sku_duplicado(client, auth_headers):
     assert dup_sku not in skus
 
 
-def test_bulk_delete_soft_delete(client, auth_headers):
+def test_bulk_delete_soft_delete(client, auth_headers, admin_auth_headers):
     a = create_item(client, auth_headers, name="Caja A", price=10.0, stock=1, sku_prefix="DEL")
     b = create_item(client, auth_headers, name="Caja B", price=10.0, stock=1, sku_prefix="DEL")
 
     r = client.request(
         "DELETE",
         "/api/v1/items/bulk",
-        headers=auth_headers,
+        headers=admin_auth_headers,
         json={"ids": [a["id"], b["id"], 999999]},
     )
     assert r.status_code == 200, r.text

@@ -28,5 +28,6 @@ class UsuarioAuthRead(BaseModel):
     id: int
     email: EmailStr
     activo: bool
+    rol: str
 
     model_config = {"from_attributes": True}

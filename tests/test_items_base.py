@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tests.conftest import create_item, get_deleted_wrapped, get_items_wrapped, request_id_from, unwrap, rand_sku
 
+
 def test_health_ok(client):
     r = client.get("/health")
     assert r.status_code == 200
@@ -51,11 +52,11 @@ def test_list_items_ok_paginado(client, auth_headers):
     assert data["items"][0]["stock"] == 1
 
 
-def test_soft_delete_oculta_en_listado_y_aparece_en_eliminados(client, auth_headers):
+def test_soft_delete_oculta_en_listado_y_aparece_en_eliminados(client, auth_headers, admin_auth_headers):
     created = create_item(client, auth_headers, name="caja soft", price=10.0, stock=1, sku_prefix="SOFT")
     item_id = created["id"]
 
-    r = client.delete(f"/api/v1/items/{item_id}", headers=auth_headers)
+    r = client.delete(f"/api/v1/items/{item_id}", headers=admin_auth_headers)
     assert r.status_code == 200, r.text
     request_id_from(r)
 
@@ -84,6 +85,7 @@ def test_restaurar_falla_si_item_no_esta_eliminado(client, auth_headers):
     body = unwrap(r.json())
     assert body["success"] is False
     assert "no está eliminado" in body["message"].lower()
+
 
 def test_create_item_con_categoria_valida(client, auth_headers):
     # Primero creamos una categoría válida
