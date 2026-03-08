@@ -14,9 +14,12 @@ from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
 from app.database.database import Base, engine
+from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
+from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.models.categoria import Categoria
+from app.models.configuracion_cors import ConfiguracionCors
 from app.models.item import Item
 from app.routers.categorias import router as categorias_router
 from app.routers.health import router as health_router
@@ -52,6 +55,8 @@ def create_app() -> FastAPI:
     # Middlewares globales
     # ------------------------
     app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(DynamicCORSMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
 

@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    CORS_ALLOW_ORIGINS: str = "http://localhost:3000,https://mi-app.com"
 
     LOG_LEVEL: str = "INFO"
 
@@ -78,6 +79,13 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.CORS_ALLOW_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     @field_validator("API_KEY")
     @classmethod
