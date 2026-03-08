@@ -3,11 +3,14 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1 import api_router_v1
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
-from app.core.config import settings
+from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
 from app.database.database import Base, engine
@@ -40,8 +43,15 @@ def create_app() -> FastAPI:
     )
 
     # ------------------------
+    # Rate limiting
+    # ------------------------
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # ------------------------
     # Middlewares globales
     # ------------------------
+    app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
 

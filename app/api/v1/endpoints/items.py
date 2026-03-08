@@ -4,11 +4,12 @@ import logging
 from datetime import date, datetime, time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.config import dynamic_rate_limit, limiter
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.responses import error_response
@@ -22,10 +23,10 @@ from app.models.movimiento_stock import MovimientoStock
 from app.repositories.item_repository import ItemRepository
 from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
+from app.schemas.cursor_pagination import CursorPaginationResponse
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
-from app.schemas.cursor_pagination import CursorPaginationResponse
 
 
 router = APIRouter()
@@ -41,7 +42,9 @@ logger = logging.getLogger(__name__)
     summary="Crear item",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
+@limiter.limit(dynamic_rate_limit)
 def crear_item(
+    request: Request,
     payload: ItemCreate,
     db: Session = Depends(get_db),
     repo: ItemRepository = Depends(get_item_repo),
@@ -346,7 +349,9 @@ def bulk_update_disponible(
     summary="Listar items con filtros, búsqueda, orden y paginación (solo activos)",
     dependencies=[Depends(verify_api_key)],
 )
+@limiter.limit(dynamic_rate_limit)
 def listar_items(
+    request: Request,
     page: int = Query(1, ge=1, description="Página (>=1)"),
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
     nombre: Optional[str] = Query(None, description="Filtra por nombre (contiene, case-insensitive)"),
@@ -423,6 +428,7 @@ def listar_items(
         metadata={},
     )
 
+
 @router.get(
     "/cursor",
     response_model=ApiResponse[CursorPaginationResponse],
@@ -470,6 +476,7 @@ def listar_items_cursor(
         data=data,
         metadata={},
     )
+
 
 @router.get(
     "/eliminados",
