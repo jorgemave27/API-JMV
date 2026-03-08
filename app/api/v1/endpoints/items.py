@@ -12,14 +12,16 @@ from sqlalchemy.orm import Session
 from app.core.config import dynamic_rate_limit, limiter
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
+from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
-from app.core.security import verify_api_key, get_current_user, require_role
+from app.core.security import verify_api_key, require_role
 from app.database.database import get_db
 from app.dependencies import get_item_repo
+from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.item import Item
-from app.models.usuario import Usuario
 from app.models.movimiento_stock import MovimientoStock
+from app.models.usuario import Usuario
 from app.repositories.item_repository import ItemRepository
 from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
@@ -31,9 +33,18 @@ from app.schemas.pagination import PaginatedResponse
 
 router = APIRouter()
 
-# Logger específico de este módulo
-# Sigue la guía del task 14: un logger por archivo usando __name__
+# Logger específico del módulo
 logger = logging.getLogger(__name__)
+
+
+def _bind_audit_user(current_user: Usuario | None) -> None:
+    """
+    Guarda el user_id actual en el contexto de auditoría.
+
+    Esto permite que los eventos de SQLAlchemy registren automáticamente
+    quién hizo el cambio, sin pasar user_id manualmente hasta el modelo.
+    """
+    set_current_user_id(current_user.id if current_user else None)
 
 
 @router.post(
@@ -48,23 +59,19 @@ def crear_item(
     payload: ItemCreate,
     db: Session = Depends(get_db),
     repo: ItemRepository = Depends(get_item_repo),
+    current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
     """
     Crea un item individual.
 
     Validaciones:
     - Si se envía categoria_id, debe existir en la base de datos
-    - Si no existe, retorna error 400
 
-    Repository pattern aplicado:
-    - La persistencia del item se delega al repository
-
-    Logging aplicado:
-    - INFO cuando el item se crea exitosamente
+    Auditoría:
+    - Se propaga el current_user al contexto antes del create
     """
-    # -------------------------
-    # Validación de categoría
-    # -------------------------
+    _bind_audit_user(current_user)
+
     if payload.categoria_id is not None:
         categoria = db.execute(
             select(Categoria).where(Categoria.id == payload.categoria_id)
@@ -76,9 +83,6 @@ def crear_item(
                 message=f"La categoría con id={payload.categoria_id} no existe",
             )
 
-    # -------------------------
-    # Creación del item
-    # -------------------------
     item = Item(
         name=payload.name,
         description=payload.description,
@@ -110,18 +114,16 @@ def crear_item(
 def bulk_create_items(
     payload: BulkCreate,
     db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
     """
     Crea múltiples items en una sola transacción.
 
-    Reglas:
-    - Si uno falla, se hace rollback de todos
-    - Se usa add_all + un solo commit
-    - Máximo 100 items validado desde el schema
-
-    Logging aplicado:
-    - ERROR con exc_info=True en fallos
+    Auditoría:
+    - Cada insert disparará su propio evento after_insert
     """
+    _bind_audit_user(current_user)
+
     try:
         objects: list[Item] = []
 
@@ -190,13 +192,10 @@ def bulk_delete_items(
     """
     Elimina en lote usando soft delete.
 
-    Reglas:
-    - No borra físicamente
-    - Marca eliminado=True y eliminado_en=now()
-    - Si algún ID no existe, no falla; lo cuenta en not_found
-
-    Logging aplicado:
-    - ERROR con exc_info=True en fallos
+    Nota:
+    - Actualmente no se amarra current_user aquí porque tu endpoint
+      no está trayendo Usuario autenticado como parámetro.
+    - Aun así, la auditoría registrará IP y acción.
     """
     try:
         now = datetime.now()
@@ -264,16 +263,9 @@ def bulk_update_disponible(
     """
     Actualiza 'disponible' en lote.
 
-    Como el modelo no tiene columna disponible, se interpreta así:
+    Regla:
     - disponible=True  => stock=1
     - disponible=False => stock=0
-
-    Regla del reto task 13:
-    - Si se intenta marcar disponible=True y el item tiene stock=0,
-      se lanza StockInsuficienteError (HTTP 409 desde el handler global)
-
-    Logging aplicado:
-    - ERROR con exc_info=True en fallos
     """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
@@ -371,14 +363,7 @@ def listar_items(
     _ip: str = Depends(log_client_ip),
 ):
     """
-    Lista items activos con:
-    - filtros opcionales
-    - búsqueda por nombre
-    - ordenamiento
-    - paginación
-
-    Nota:
-    - disponible se interpreta con base en stock
+    Lista items activos con filtros, orden y paginación.
     """
     stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
 
@@ -430,6 +415,34 @@ def listar_items(
 
 
 @router.get(
+    "/buscar",
+    response_model=ApiResponse[list[ItemRead]],
+    summary="Buscar items por nombre exacto de forma segura",
+    dependencies=[Depends(verify_api_key)],
+)
+def buscar_items(
+    nombre: str = Query(..., min_length=1, description="Nombre exacto del item"),
+    db: Session = Depends(get_db),
+):
+    """
+    Búsqueda segura por nombre exacto usando ORM.
+    """
+    items = (
+        db.query(Item)
+        .filter(Item.name == nombre, Item.eliminado.is_(False))
+        .order_by(Item.id.asc())
+        .all()
+    )
+
+    return ApiResponse[list[ItemRead]](
+        success=True,
+        message="Búsqueda segura ejecutada",
+        data=[ItemRead.model_validate(item) for item in items],
+        metadata={},
+    )
+
+
+@router.get(
     "/cursor",
     response_model=ApiResponse[CursorPaginationResponse],
     summary="Listar items con paginación por cursor (keyset pagination)",
@@ -442,12 +455,6 @@ def listar_items_cursor(
 ):
     """
     Lista items activos usando paginación por cursor.
-
-    Reglas:
-    - Solo devuelve items con id > cursor
-    - Ordena por id ascendente
-    - Retorna next_cursor basado en el último item devuelto
-    - has_more indica si hay más resultados después de esta página
     """
     stmt = (
         select(Item)
@@ -461,7 +468,6 @@ def listar_items_cursor(
 
     has_more = len(results) > limite
     items = results[:limite]
-
     next_cursor = items[-1].id if items else None
 
     data = CursorPaginationResponse(
@@ -490,7 +496,7 @@ def listar_eliminados(
     db: Session = Depends(get_db),
 ):
     """
-    Lista items eliminados lógicamente (soft delete).
+    Lista items eliminados lógicamente.
     """
     stmt = select(Item).where(Item.eliminado == True)  # noqa: E712
 
@@ -527,12 +533,112 @@ def listar_eliminados(
 )
 def mi_ip(ip: str = Depends(get_client_ip)):
     """
-    Endpoint demo para probar dependency injection de IP del cliente.
+    Endpoint demo para probar dependency injection de IP.
     """
     return ApiResponse[dict](
         success=True,
         message="IP obtenida exitosamente",
         data={"ip": ip},
+        metadata={},
+    )
+
+
+@router.get(
+    "/{item_id}/historial",
+    response_model=ApiResponse[list[dict]],
+    summary="Obtener historial de auditoría de un item",
+    dependencies=[Depends(verify_api_key)],
+)
+def obtener_historial_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Obtiene todos los registros de auditoría de un item específico,
+    ordenados cronológicamente.
+    """
+    auditorias = (
+        db.execute(
+            select(AuditoriaItem)
+            .where(AuditoriaItem.item_id == item_id)
+            .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    data = [
+        {
+            "id": audit.id,
+            "item_id": audit.item_id,
+            "accion": audit.accion,
+            "datos_anteriores": audit.datos_anteriores,
+            "datos_nuevos": audit.datos_nuevos,
+            "usuario_id": audit.usuario_id,
+            "timestamp": audit.timestamp.isoformat() if audit.timestamp else None,
+            "ip_cliente": audit.ip_cliente,
+        }
+        for audit in auditorias
+    ]
+
+    return ApiResponse[list[dict]](
+        success=True,
+        message="Historial de auditoría obtenido exitosamente",
+        data=data,
+        metadata={},
+    )
+
+
+@router.get(
+    "/{item_id}/estado",
+    response_model=ApiResponse[dict],
+    summary="Reconstruir estado de un item en una fecha específica",
+    dependencies=[Depends(verify_api_key)],
+)
+def obtener_estado_item_en_fecha(
+    item_id: int,
+    fecha: datetime = Query(..., description="Fecha y hora en formato ISO 8601"),
+    db: Session = Depends(get_db),
+):
+    """
+    Reconstruye el estado de un item en una fecha específica
+    usando los registros de auditoría hasta ese momento.
+    """
+    auditorias = (
+        db.execute(
+            select(AuditoriaItem)
+            .where(AuditoriaItem.item_id == item_id)
+            .where(AuditoriaItem.timestamp <= fecha)
+            .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    estado: dict | None = None
+
+    for audit in auditorias:
+        if audit.accion == "CREATE":
+            estado = audit.datos_nuevos.copy() if audit.datos_nuevos else None
+        elif audit.accion == "UPDATE":
+            estado = audit.datos_nuevos.copy() if audit.datos_nuevos else estado
+        elif audit.accion == "DELETE":
+            # En soft delete, normalmente datos_nuevos sí existe con eliminado=True.
+            # En delete físico, datos_nuevos sería None.
+            if audit.datos_nuevos is None:
+                estado = None
+            else:
+                estado = audit.datos_nuevos.copy()
+
+    return ApiResponse[dict](
+        success=True,
+        message="Estado reconstruido exitosamente",
+        data={
+            "item_id": item_id,
+            "fecha_consulta": fecha.isoformat(),
+            "exists_at_that_time": estado is not None,
+            "estado": estado,
+        },
         metadata={},
     )
 
@@ -551,13 +657,12 @@ def eliminar_item(
     """
     Soft delete de un item individual.
 
-    Reglas:
-    - Si no existe => ItemNoEncontradoError
-    - Si ya estaba eliminado => warning log y respuesta idempotente
-
-    Repository pattern aplicado:
-    - La obtención y eliminación del item se delegan al repository
+    Auditoría:
+    - El evento after_update registrará DELETE cuando eliminado
+      cambie de False a True.
     """
+    _bind_audit_user(current_user)
+
     item = repo.get_by_id(item_id)
 
     if not item:
@@ -597,17 +702,16 @@ def eliminar_item(
 def restaurar_item(
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
+    current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
     """
     Restaura un item previamente eliminado.
 
-    Reglas:
-    - Si no existe => ItemNoEncontradoError
-    - Si no está eliminado => error_response 400
-
-    Repository pattern aplicado:
-    - La obtención y actualización del item se delegan al repository
+    Auditoría:
+    - El cambio se registrará como UPDATE
     """
+    _bind_audit_user(current_user)
+
     item = repo.get_by_id(item_id)
 
     if not item:
@@ -638,16 +742,17 @@ def transferir_stock(
     payload: TransferirStockRequest,
     db: Session = Depends(get_db),
     repo: ItemRepository = Depends(get_item_repo),
+    current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
     """
     Transfiere stock entre dos items de forma atómica.
 
-    La operación valida existencia, stock suficiente y registra auditoría
-    en la misma transacción.
-
-    Repository pattern aplicado:
-    - La obtención de items se hace mediante el repository
+    Auditoría:
+    - Los cambios sobre item_origen e item_destino quedarán registrados
+      por los eventos after_update de Item.
     """
+    _bind_audit_user(current_user)
+
     if payload.item_origen_id == payload.item_destino_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

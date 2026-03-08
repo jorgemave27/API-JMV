@@ -14,10 +14,13 @@ from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
 from app.database.database import Base, engine
+from app.middlewares.audit_context import AuditContextMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
+from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
+from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.configuracion_cors import ConfiguracionCors
 from app.models.item import Item
@@ -45,34 +48,33 @@ def create_app() -> FastAPI:
         description="API JMV - FastAPI + SQLAlchemy + buenas prácticas",
     )
 
-    # ------------------------
+    # -------------------------------------------------------------
     # Rate limiting
-    # ------------------------
+    # -------------------------------------------------------------
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # ------------------------
+    # -------------------------------------------------------------
     # Middlewares globales
-    # ------------------------
+    # -------------------------------------------------------------
     app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(AuditContextMiddleware)      # Contexto para auditoría
     app.add_middleware(DynamicCORSMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(SQLInjectionWarningMiddleware)
 
-    # ------------------------
+    # -------------------------------------------------------------
     # Base de datos
-    # ------------------------
-    # Crea tablas automáticamente en entorno local/desarrollo.
-    # En un entorno productivo esto normalmente se manejaría con migraciones.
-    #
-    # Importar los modelos asegura que SQLAlchemy los registre
-    # correctamente en Base.metadata antes de ejecutar create_all().
+    # -------------------------------------------------------------
+    # Importar modelos asegura que SQLAlchemy los registre en metadata
+    # antes de ejecutar create_all() en entorno local/desarrollo.
     Base.metadata.create_all(bind=engine)
 
-    # ------------------------
+    # -------------------------------------------------------------
     # Exception handlers
-    # ------------------------
+    # -------------------------------------------------------------
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -155,26 +157,13 @@ def create_app() -> FastAPI:
             },
         )
 
-    # ------------------------
+    # -------------------------------------------------------------
     # Routers
-    # ------------------------
-
-    # Healthcheck / utilitarios existentes
+    # -------------------------------------------------------------
     app.include_router(health_router)
-
-    # CRUD de categorías
     app.include_router(categorias_router)
-
-    # Endpoint informativo de versión de API
-    # Ejemplo: GET /api/version
     app.include_router(version_router, prefix="/api")
-
-    # API versionada v1
-    # Ejemplo: /api/v1/items
     app.include_router(api_router_v1, prefix="/api/v1")
-
-    # API versionada v2
-    # Ejemplo: /api/v2/items
     app.include_router(api_router_v2, prefix="/api/v2")
 
     return app
