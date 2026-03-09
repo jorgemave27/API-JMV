@@ -10,20 +10,27 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api.v1 import api_router_v1
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
+
 from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
+
 from app.database.database import Base, engine
+
 from app.middlewares.audit_context import AuditContextMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
+from app.middlewares.threat_detection import ThreatDetectionMiddleware
+from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
+
 from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.configuracion_cors import ConfiguracionCors
 from app.models.item import Item
+
 from app.routers.categorias import router as categorias_router
 from app.routers.health import router as health_router
 
@@ -59,11 +66,13 @@ def create_app() -> FastAPI:
     # -------------------------------------------------------------
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(AuditContextMiddleware)      # Contexto para auditoría
-    app.add_middleware(DynamicCORSMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(RequestIdMiddleware)
-    app.add_middleware(SQLInjectionWarningMiddleware)
+    app.add_middleware(ThreatDetectionMiddleware)  # Detección de amenazas
+    app.add_middleware(ContentTypeValidationMiddleware)  # Validación de Content-Type
+    app.add_middleware(DynamicCORSMiddleware)     # CORS dinámico basado en DB
+    app.add_middleware(SecurityHeadersMiddleware)   # Encabezados de seguridad
+    app.add_middleware(RequestLoggingMiddleware)   # Logging detallado de requests/responses
+    app.add_middleware(RequestIdMiddleware)     # Asignación de request_id para trazabilidad
+    app.add_middleware(SQLInjectionWarningMiddleware) # Detección de patrones de inyección SQL en inputs
 
     # -------------------------------------------------------------
     # Base de datos

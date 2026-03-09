@@ -65,7 +65,11 @@ def crear_item(
     Crea un item individual.
 
     Validaciones:
+    - Verifica Content-Type = application/json
     - Si se envía categoria_id, debe existir en la base de datos
+
+    Sanitización:
+    - name y description ya llegan sanitizados desde Pydantic
 
     Auditoría:
     - Se propaga el current_user al contexto antes del create

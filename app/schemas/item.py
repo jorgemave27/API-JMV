@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.sanitizers import sanitize_text
 from app.schemas.categoria import CategoriaResponse
 
 SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
@@ -17,10 +18,15 @@ class ItemCreate(BaseModel):
 
     Incluye validaciones de:
     - nombre
+    - descripción
     - precio
     - codigo_sku
     - stock
     - categoria_id opcional
+
+    Sanitización aplicada:
+    - name
+    - description
     """
 
     name: str = Field(..., min_length=1, max_length=200, description="Nombre del item")
@@ -28,17 +34,14 @@ class ItemCreate(BaseModel):
     price: float = Field(..., gt=0, description="Precio > 0")
     stock: int = Field(0, ge=0, description="Stock disponible (>=0)")
 
-    # SKU legacy (sigue en tu modelo DB)
     sku: Optional[str] = Field(None, max_length=50, description="SKU libre (legacy)")
 
-    # SKU del reto (AB-1234)
     codigo_sku: Optional[str] = Field(
         None,
         description="SKU opcional con formato AB-1234",
         examples=["AB-1234"],
     )
 
-    # Relación opcional con categoría
     categoria_id: Optional[int] = Field(
         None,
         ge=1,
@@ -47,11 +50,15 @@ class ItemCreate(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def name_title_case(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("name no puede estar vacío")
-        return v.title()
+    def sanitize_name(cls, v: str) -> str:
+        return sanitize_text(v, field_name="name", max_length=200).title()
+
+    @field_validator("description")
+    @classmethod
+    def sanitize_description(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return sanitize_text(v, field_name="description", max_length=500)
 
     @field_validator("price")
     @classmethod
@@ -75,11 +82,6 @@ class ItemCreate(BaseModel):
 class ItemRead(BaseModel):
     """
     Schema de salida para items.
-
-    Incluye:
-    - datos principales del item
-    - soft delete
-    - categoría anidada opcional
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -92,11 +94,7 @@ class ItemRead(BaseModel):
     codigo_sku: Optional[str] = None
     stock: int
     categoria_id: Optional[int] = None
-
-    # Categoría anidada
     categoria: Optional[CategoriaResponse] = None
-
-    # Soft delete fields
     eliminado: bool
     eliminado_en: Optional[datetime] = None
 
@@ -104,9 +102,6 @@ class ItemRead(BaseModel):
 class ItemReadV2(ItemRead):
     """
     Schema de salida para items en v2.
-
-    Extiende ItemRead agregando el campo calculado:
-    - precio_con_iva
     """
 
     precio_con_iva: float
