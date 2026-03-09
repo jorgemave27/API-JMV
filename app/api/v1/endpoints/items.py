@@ -4,12 +4,23 @@ import logging
 from datetime import date, datetime, time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.config import dynamic_rate_limit, limiter
+from app.core.cache import (
+    build_item_cache_key,
+    build_items_list_cache_key,
+    build_items_list_signature,
+    delete_cache,
+    get_cache,
+    invalidate_first_page_list_caches,
+    invalidate_list_caches_for_item,
+    register_list_cache,
+    set_cache,
+)
+from app.core.config import dynamic_rate_limit, limiter, settings
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.request_context import set_current_user_id
@@ -64,15 +75,9 @@ def crear_item(
     """
     Crea un item individual.
 
-    Validaciones:
-    - Verifica Content-Type = application/json
-    - Si se envía categoria_id, debe existir en la base de datos
-
-    Sanitización:
-    - name y description ya llegan sanitizados desde Pydantic
-
-    Auditoría:
-    - Se propaga el current_user al contexto antes del create
+    Caché:
+    - Al crear un item nuevo, invalidamos primeras páginas del listado,
+      porque son las que más probablemente cambien.
     """
     _bind_audit_user(current_user)
 
@@ -99,6 +104,9 @@ def crear_item(
 
     item = repo.create(item)
 
+    # Invalidación inteligente: no vaciamos toda la caché, solo primeras páginas
+    invalidate_first_page_list_caches()
+
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
     return ApiResponse[ItemRead](
@@ -123,8 +131,8 @@ def bulk_create_items(
     """
     Crea múltiples items en una sola transacción.
 
-    Auditoría:
-    - Cada insert disparará su propio evento after_insert
+    Caché:
+    - Al insertar muchos items, invalidamos primeras páginas de listados.
     """
     _bind_audit_user(current_user)
 
@@ -148,6 +156,8 @@ def bulk_create_items(
 
         for obj in objects:
             db.refresh(obj)
+
+        invalidate_first_page_list_caches()
 
         logger.info(f"Bulk create completado: total_items={len(objects)}")
 
@@ -196,10 +206,8 @@ def bulk_delete_items(
     """
     Elimina en lote usando soft delete.
 
-    Nota:
-    - Actualmente no se amarra current_user aquí porque tu endpoint
-      no está trayendo Usuario autenticado como parámetro.
-    - Aun así, la auditoría registrará IP y acción.
+    Caché:
+    - Invalida caché individual y páginas relacionadas de cada item afectado.
     """
     try:
         now = datetime.now()
@@ -210,6 +218,7 @@ def bulk_delete_items(
 
         deleted = 0
         not_found = 0
+        affected_ids: list[int] = []
 
         for item_id in payload.ids:
             item = found_map.get(item_id)
@@ -222,8 +231,14 @@ def bulk_delete_items(
                 item.eliminado = True
                 item.eliminado_en = now
                 deleted += 1
+                affected_ids.append(item.id)
 
         db.commit()
+
+        # Invalidación de caché después del commit
+        for item_id in affected_ids:
+            delete_cache(build_item_cache_key(item_id))
+            invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
         logger.info(
             f"Bulk delete procesado: deleted={deleted}, not_found={not_found}"
@@ -267,9 +282,8 @@ def bulk_update_disponible(
     """
     Actualiza 'disponible' en lote.
 
-    Regla:
-    - disponible=True  => stock=1
-    - disponible=False => stock=0
+    Caché:
+    - Si cambia stock, invalidamos caché individual y páginas relacionadas.
     """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
@@ -278,6 +292,7 @@ def bulk_update_disponible(
 
         updated = 0
         not_found = 0
+        affected_ids: list[int] = []
 
         for item_id in payload.ids:
             item = found_map.get(item_id)
@@ -293,6 +308,7 @@ def bulk_update_disponible(
                 if item.stock != 0:
                     item.stock = 0
                     updated += 1
+                    affected_ids.append(item.id)
 
         if payload.disponible:
             for item_id in payload.ids:
@@ -303,8 +319,14 @@ def bulk_update_disponible(
                 if item.stock != 1:
                     item.stock = 1
                     updated += 1
+                    affected_ids.append(item.id)
 
         db.commit()
+
+        # Invalidación de caché después del commit
+        for item_id in set(affected_ids):
+            delete_cache(build_item_cache_key(item_id))
+            invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
         logger.info(
             f"Bulk update disponible procesado: updated={updated}, not_found={not_found}, disponible={payload.disponible}"
@@ -348,6 +370,7 @@ def bulk_update_disponible(
 @limiter.limit(dynamic_rate_limit)
 def listar_items(
     request: Request,
+    response: Response,
     page: int = Query(1, ge=1, description="Página (>=1)"),
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
     nombre: Optional[str] = Query(None, description="Filtra por nombre (contiene, case-insensitive)"),
@@ -368,7 +391,30 @@ def listar_items(
 ):
     """
     Lista items activos con filtros, orden y paginación.
+
+    Caché:
+    - Usa cache key basada en filtros + page.
+    - Si existe en Redis => X-Cache: HIT
+    - Si no existe => consulta BD, guarda en Redis => X-Cache: MISS
     """
+    cache_params = {
+        "page_size": page_size,
+        "nombre": nombre,
+        "precio_min": precio_min,
+        "precio_max": precio_max,
+        "disponible": disponible,
+        "ordenar_por": ordenar_por,
+        "creado_desde": creado_desde.isoformat() if creado_desde else None,
+    }
+
+    signature = build_items_list_signature(cache_params)
+    cache_key = build_items_list_cache_key(signature, page)
+
+    cached_page = get_cache(cache_key)
+    if cached_page is not None:
+        response.headers["X-Cache"] = "HIT"
+        return cached_page
+
     stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
 
     if nombre:
@@ -410,12 +456,33 @@ def listar_items(
         items=[ItemRead.model_validate(i) for i in items],
     )
 
-    return ApiResponse[PaginatedResponse[ItemRead]](
+    payload = ApiResponse[PaginatedResponse[ItemRead]](
         success=True,
         message="Items obtenidos exitosamente",
         data=paginated,
         metadata={},
     )
+
+    # Guardamos payload serializable en Redis
+    payload_dict = payload.model_dump(mode="json")
+
+    set_cache(
+        cache_key,
+        payload_dict,
+        ttl=settings.CACHE_TTL_LIST_SECONDS,
+    )
+
+    # Registramos metadata para invalidación inteligente
+    register_list_cache(
+        cache_key=cache_key,
+        page=page,
+        ttl=settings.CACHE_TTL_LIST_SECONDS,
+        item_ids=[item.id for item in items],
+        params=cache_params,
+    )
+
+    response.headers["X-Cache"] = "MISS"
+    return payload
 
 
 @router.get(
@@ -548,6 +615,55 @@ def mi_ip(ip: str = Depends(get_client_ip)):
 
 
 @router.get(
+    "/{item_id}",
+    response_model=ApiResponse[ItemRead],
+    summary="Obtener item por ID",
+    dependencies=[Depends(verify_api_key)],
+)
+def obtener_item_por_id(
+    item_id: int,
+    response: Response,
+    repo: ItemRepository = Depends(get_item_repo),
+):
+    """
+    Obtiene un item por ID usando patrón cache-aside.
+
+    Flujo:
+    1. Busca en Redis.
+    2. Si existe: X-Cache=HIT
+    3. Si no existe: consulta BD, guarda en Redis, X-Cache=MISS
+    """
+    cache_key = build_item_cache_key(item_id)
+
+    cached_item = get_cache(cache_key)
+    if cached_item is not None:
+        response.headers["X-Cache"] = "HIT"
+        return cached_item
+
+    item = repo.get_by_id(item_id)
+
+    if not item:
+        response.headers["X-Cache"] = "MISS"
+        raise ItemNoEncontradoError(item_id)
+
+    payload = ApiResponse[ItemRead](
+        success=True,
+        message="Item obtenido exitosamente",
+        data=ItemRead.model_validate(item),
+        metadata={},
+    )
+
+    set_cache(
+        cache_key,
+        payload.model_dump(mode="json"),
+        ttl=settings.CACHE_TTL_ITEM_SECONDS,
+    )
+
+    response.headers["X-Cache"] = "MISS"
+    return payload
+
+
+@router.get(
     "/{item_id}/historial",
     response_model=ApiResponse[list[dict]],
     summary="Obtener historial de auditoría de un item",
@@ -627,8 +743,6 @@ def obtener_estado_item_en_fecha(
         elif audit.accion == "UPDATE":
             estado = audit.datos_nuevos.copy() if audit.datos_nuevos else estado
         elif audit.accion == "DELETE":
-            # En soft delete, normalmente datos_nuevos sí existe con eliminado=True.
-            # En delete físico, datos_nuevos sería None.
             if audit.datos_nuevos is None:
                 estado = None
             else:
@@ -661,9 +775,9 @@ def eliminar_item(
     """
     Soft delete de un item individual.
 
-    Auditoría:
-    - El evento after_update registrará DELETE cuando eliminado
-      cambie de False a True.
+    Caché:
+    - Borra caché individual del item
+    - Invalida páginas de listados relacionadas
     """
     _bind_audit_user(current_user)
 
@@ -684,6 +798,10 @@ def eliminar_item(
         )
 
     repo.delete(item)
+
+    # Invalidación de caché después del delete
+    delete_cache(build_item_cache_key(item_id))
+    invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
     logger.info(
         f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"
@@ -711,8 +829,9 @@ def restaurar_item(
     """
     Restaura un item previamente eliminado.
 
-    Auditoría:
-    - El cambio se registrará como UPDATE
+    Caché:
+    - Borra caché individual del item
+    - Invalida páginas relacionadas para que reaparezca donde corresponda
     """
     _bind_audit_user(current_user)
 
@@ -727,6 +846,9 @@ def restaurar_item(
     item.eliminado = False
     item.eliminado_en = None
     item = repo.update(item)
+
+    delete_cache(build_item_cache_key(item_id))
+    invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
     logger.info(f"Item restaurado: id={item.id}")
 
@@ -751,9 +873,9 @@ def transferir_stock(
     """
     Transfiere stock entre dos items de forma atómica.
 
-    Auditoría:
-    - Los cambios sobre item_origen e item_destino quedarán registrados
-      por los eventos after_update de Item.
+    Caché:
+    - Invalida caché de item origen y destino
+    - Invalida páginas relacionadas porque cambió stock
     """
     _bind_audit_user(current_user)
 
@@ -823,6 +945,11 @@ def transferir_stock(
 
     db.refresh(item_origen)
     db.refresh(item_destino)
+
+    # Invalidación de caché de ambos items
+    for affected_id in (item_origen.id, item_destino.id):
+        delete_cache(build_item_cache_key(affected_id))
+        invalidate_list_caches_for_item(affected_id, include_first_pages=True)
 
     return {
         "success": True,

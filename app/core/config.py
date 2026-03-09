@@ -64,14 +64,20 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    CORS_ALLOW_ORIGINS: str = "http://localhost:3000,https://mi-app.com"
 
+    CORS_ALLOW_ORIGINS: str = "http://localhost:3000,https://mi-app.com"
     LOG_LEVEL: str = "INFO"
 
     APP_NAME: str = "API JMV"
     APP_ENV: str = APP_ENV
 
     MAX_ITEMS_PER_PAGE: int = 100
+
+    # Redis / Cache
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_ENABLED: bool = True
+    CACHE_TTL_ITEM_SECONDS: int = 300
+    CACHE_TTL_LIST_SECONDS: int = 300
 
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
