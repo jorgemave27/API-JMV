@@ -24,6 +24,13 @@ API_KEY = "dev-secret-key-change-me"
 API_PREFIX = "/api/v1"
 ITEMS_BASE = f"{API_PREFIX}/items"
 
+# -------------------------------------------------------------
+# Contraseñas válidas para tests con nueva política de complejidad
+# -------------------------------------------------------------
+TEST_ADMIN_PASSWORD = "Test123!"
+TEST_EDITOR_PASSWORD = "Test123!"
+TEST_LECTOR_PASSWORD = "Test123!"
+
 
 def rand_sku(prefix: str = "CAJA") -> str:
     return f"{prefix}-{''.join(random.choices(string.digits, k=6))}"
@@ -64,6 +71,18 @@ def client(setup_db):
         yield c
 
 
+@pytest.fixture(scope="function")
+def db_session(setup_db):
+    """
+    Sesión DB reutilizable para tests que necesitan consultar directamente la BD.
+    """
+    db = setup_db()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def _ensure_user(
     TestingSessionLocal,
     *,
@@ -92,6 +111,11 @@ def _ensure_user(
             user.hashed_password = hash_password(password)
             user.activo = True
             user.rol = rol
+            user.failed_login_attempts = 0
+            user.blocked_until = None
+            user.reset_token_hash = None
+            user.reset_token_expires_at = None
+            user.reset_token_used_at = None
             db.commit()
             db.refresh(user)
 
@@ -110,7 +134,7 @@ def auth_headers(setup_db) -> dict[str, str]:
     token = _ensure_user(
         setup_db,
         email="editor@test.com",
-        password="Test123456",
+        password=TEST_EDITOR_PASSWORD,
         rol="editor",
     )
     return {
@@ -128,7 +152,7 @@ def admin_auth_headers(setup_db) -> dict[str, str]:
     token = _ensure_user(
         setup_db,
         email="admin@test.com",
-        password="Test123456",
+        password=TEST_ADMIN_PASSWORD,
         rol="admin",
     )
     return {
@@ -145,7 +169,7 @@ def lector_auth_headers(setup_db) -> dict[str, str]:
     token = _ensure_user(
         setup_db,
         email="lector@test.com",
-        password="Test123456",
+        password=TEST_LECTOR_PASSWORD,
         rol="lector",
     )
     return {
