@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     CACHE_TTL_ITEM_SECONDS: int = 300
     CACHE_TTL_LIST_SECONDS: int = 300
 
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
         env_file_encoding="utf-8",

@@ -41,6 +41,7 @@ from app.schemas.cursor_pagination import CursorPaginationResponse
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
+from app.workers.tasks import enviar_notificacion
 
 
 router = APIRouter()
@@ -107,6 +108,9 @@ def crear_item(
 
     # Invalidación inteligente: no vaciamos toda la caché, solo primeras páginas
     invalidate_first_page_list_caches()
+
+    # Disparo de tarea en background con Celery
+    enviar_notificacion.delay(item.id, "admin@empresa.com")
 
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
