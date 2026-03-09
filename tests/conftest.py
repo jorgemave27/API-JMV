@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 # Root del proyecto al path (para imports app.*)
@@ -13,10 +14,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings
 from app.core.security import create_access_token, hash_password
-from app.database.database import Base, get_db
+from app.database.database import Base, get_db, get_db_async
 from app.main import app
 from app.models.usuario import Usuario
 
@@ -36,22 +43,56 @@ def rand_sku(prefix: str = "CAJA") -> str:
     return f"{prefix}-{''.join(random.choices(string.digits, k=6))}"
 
 
+def build_async_test_database_url(database_url: str) -> str:
+    """
+    Convierte una URL sync a async para usarla en AsyncSession de tests.
+    """
+    if database_url.startswith("sqlite:///"):
+        return database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if database_url.startswith("postgresql+psycopg2://"):
+        return database_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    return database_url
+
+
 @pytest.fixture(scope="function")
 def setup_db(tmp_path: Path):
     """
-    BD limpia por test (sqlite archivo temporal) + override get_db
+    BD limpia por test (sqlite archivo temporal) + override get_db y get_db_async.
+    También desactiva caché para evitar contaminación entre tests.
     """
     test_db_path = tmp_path / "test.db"
     test_db_url = f"sqlite:///{test_db_path}"
+    async_test_db_url = build_async_test_database_url(test_db_url)
 
+    # Engine/session sync
     engine = create_engine(
         test_db_url,
         connect_args={"check_same_thread": False},
     )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    TestingSessionLocal = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
+    )
 
+    # Crear esquema con engine sync
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+
+    # Engine/session async apuntando al mismo archivo sqlite temporal
+    async_engine = create_async_engine(
+        async_test_db_url,
+        connect_args={"check_same_thread": False},
+    )
+    AsyncTestingSessionLocal = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
 
     def override_get_db():
         db = TestingSessionLocal()
@@ -60,9 +101,21 @@ def setup_db(tmp_path: Path):
         finally:
             db.close()
 
+    async def override_get_db_async() -> AsyncGenerator[AsyncSession, None]:
+        async with AsyncTestingSessionLocal() as db:
+            yield db
+
+    # Guardar valor original de caché para restaurarlo al final
+    original_cache_enabled = settings.CACHE_ENABLED
+    settings.CACHE_ENABLED = False
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_db_async] = override_get_db_async
+
     yield TestingSessionLocal
+
     app.dependency_overrides.clear()
+    settings.CACHE_ENABLED = original_cache_enabled
 
 
 @pytest.fixture(scope="function")

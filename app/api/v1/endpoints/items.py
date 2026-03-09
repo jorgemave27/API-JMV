@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.cache import (
@@ -26,7 +27,7 @@ from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
 from app.core.security import verify_api_key, require_role
-from app.database.database import get_db
+from app.database.database import get_db, get_db_async
 from app.dependencies import get_item_repo
 from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
@@ -368,7 +369,7 @@ def bulk_update_disponible(
     dependencies=[Depends(verify_api_key)],
 )
 @limiter.limit(dynamic_rate_limit)
-def listar_items(
+async def listar_items(
     request: Request,
     response: Response,
     page: int = Query(1, ge=1, description="Página (>=1)"),
@@ -386,16 +387,16 @@ def listar_items(
         None,
         description="Filtra items creados desde esta fecha (YYYY-MM-DD)",
     ),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db_async),
     _ip: str = Depends(log_client_ip),
 ):
     """
-    Lista items activos con filtros, orden y paginación.
+    Lista items activos con filtros, orden y paginación usando AsyncSession.
 
     Caché:
     - Usa cache key basada en filtros + page.
     - Si existe en Redis => X-Cache: HIT
-    - Si no existe => consulta BD, guarda en Redis => X-Cache: MISS
+    - Si no existe => consulta BD async, guarda en Redis => X-Cache: MISS
     """
     cache_params = {
         "page_size": page_size,
@@ -434,7 +435,8 @@ def listar_items(
         stmt = stmt.where(Item.created_at >= dt)
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = db.execute(count_stmt).scalar_one()
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar_one()
 
     order_map = {
         "precio_asc": Item.price.asc(),
@@ -447,7 +449,8 @@ def listar_items(
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
 
-    items = db.execute(stmt).scalars().all()
+    result = await db.execute(stmt)
+    items = result.scalars().all()
 
     paginated = PaginatedResponse[ItemRead](
         page=page,
@@ -463,7 +466,6 @@ def listar_items(
         metadata={},
     )
 
-    # Guardamos payload serializable en Redis
     payload_dict = payload.model_dump(mode="json")
 
     set_cache(
@@ -472,7 +474,6 @@ def listar_items(
         ttl=settings.CACHE_TTL_LIST_SECONDS,
     )
 
-    # Registramos metadata para invalidación inteligente
     register_list_cache(
         cache_key=cache_key,
         page=page,
