@@ -24,6 +24,7 @@ from app.core.cache import (
 from app.core.config import dynamic_rate_limit, limiter, settings
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
+from app.core.metrics import ITEMS_CREATED_BY_CATEGORY
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
 from app.core.security import verify_api_key, require_role
@@ -41,8 +42,8 @@ from app.schemas.cursor_pagination import CursorPaginationResponse
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
+from app.services.metrics_service import sync_active_items_gauge
 from app.workers.tasks import enviar_notificacion
-
 
 router = APIRouter()
 
@@ -80,9 +81,14 @@ def crear_item(
     Caché:
     - Al crear un item nuevo, invalidamos primeras páginas del listado,
       porque son las que más probablemente cambien.
+
+    Métricas:
+    - Incrementa contador por categoría.
+    - Sincroniza gauge de items activos.
     """
     _bind_audit_user(current_user)
 
+    categoria = None
     if payload.categoria_id is not None:
         categoria = db.execute(
             select(Categoria).where(Categoria.id == payload.categoria_id)
@@ -105,6 +111,13 @@ def crear_item(
     )
 
     item = repo.create(item)
+
+    # ==========================================================
+    # Métricas Prometheus
+    # ==========================================================
+    category_name = categoria.nombre if categoria else "sin_categoria"
+    ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
+    sync_active_items_gauge(db)
 
     # Invalidación inteligente: no vaciamos toda la caché, solo primeras páginas
     invalidate_first_page_list_caches()
@@ -138,13 +151,37 @@ def bulk_create_items(
 
     Caché:
     - Al insertar muchos items, invalidamos primeras páginas de listados.
+
+    Métricas:
+    - Incrementa contador de items creados.
+    - Sincroniza gauge de items activos al finalizar.
     """
     _bind_audit_user(current_user)
 
     try:
         objects: list[Item] = []
+        categorias_ids = [it.categoria_id for it in payload.items if getattr(it, "categoria_id", None) is not None]
+        categorias_map: dict[int, Categoria] = {}
+
+        if categorias_ids:
+            categorias = (
+                db.execute(
+                    select(Categoria).where(Categoria.id.in_(categorias_ids))
+                )
+                .scalars()
+                .all()
+            )
+            categorias_map = {categoria.id: categoria for categoria in categorias}
 
         for it in payload.items:
+            categoria_id = getattr(it, "categoria_id", None)
+
+            if categoria_id is not None and categoria_id not in categorias_map:
+                return error_response(
+                    status_code=400,
+                    message=f"La categoría con id={categoria_id} no existe",
+                )
+
             objects.append(
                 Item(
                     name=it.name,
@@ -153,6 +190,7 @@ def bulk_create_items(
                     sku=it.sku,
                     codigo_sku=it.codigo_sku,
                     stock=it.stock,
+                    categoria_id=categoria_id,
                 )
             )
 
@@ -161,6 +199,20 @@ def bulk_create_items(
 
         for obj in objects:
             db.refresh(obj)
+
+        # ==========================================================
+        # Métricas Prometheus
+        # ==========================================================
+        for it in payload.items:
+            categoria_id = getattr(it, "categoria_id", None)
+            if categoria_id is not None and categoria_id in categorias_map:
+                category_name = categorias_map[categoria_id].nombre
+            else:
+                category_name = "sin_categoria"
+
+            ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
+
+        sync_active_items_gauge(db)
 
         invalidate_first_page_list_caches()
 
@@ -213,6 +265,9 @@ def bulk_delete_items(
 
     Caché:
     - Invalida caché individual y páginas relacionadas de cada item afectado.
+
+    Métricas:
+    - Sincroniza gauge de items activos tras el commit.
     """
     try:
         now = datetime.now()
@@ -239,6 +294,11 @@ def bulk_delete_items(
                 affected_ids.append(item.id)
 
         db.commit()
+
+        # ==========================================================
+        # Métricas Prometheus
+        # ==========================================================
+        sync_active_items_gauge(db)
 
         # Invalidación de caché después del commit
         for item_id in affected_ids:
@@ -783,6 +843,9 @@ def eliminar_item(
     Caché:
     - Borra caché individual del item
     - Invalida páginas de listados relacionadas
+
+    Métricas:
+    - Sincroniza gauge de items activos.
     """
     _bind_audit_user(current_user)
 
@@ -803,6 +866,11 @@ def eliminar_item(
         )
 
     repo.delete(item)
+
+    # ==========================================================
+    # Métricas Prometheus
+    # ==========================================================
+    sync_active_items_gauge(repo.db)
 
     # Invalidación de caché después del delete
     delete_cache(build_item_cache_key(item_id))
@@ -837,6 +905,9 @@ def restaurar_item(
     Caché:
     - Borra caché individual del item
     - Invalida páginas relacionadas para que reaparezca donde corresponda
+
+    Métricas:
+    - Sincroniza gauge de items activos.
     """
     _bind_audit_user(current_user)
 
@@ -851,6 +922,11 @@ def restaurar_item(
     item.eliminado = False
     item.eliminado_en = None
     item = repo.update(item)
+
+    # ==========================================================
+    # Métricas Prometheus
+    # ==========================================================
+    sync_active_items_gauge(repo.db)
 
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)

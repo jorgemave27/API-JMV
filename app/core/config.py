@@ -59,6 +59,7 @@ limiter = Limiter(key_func=rate_limit_key_func)
 class Settings(BaseSettings):
     DATABASE_URL: str
     API_KEY: str
+    APP_VERSION: str = "1.0.0"
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

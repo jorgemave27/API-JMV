@@ -3,36 +3,33 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1 import api_router_v1
+from app.api.v1.endpoints.health import router as health_router
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
-
 from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
-
-from app.database.database import Base, engine
-
+from app.database.database import Base, SessionLocal, engine
 from app.middlewares.audit_context import AuditContextMiddleware
+from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
-from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
-
 from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.configuracion_cors import ConfiguracionCors
 from app.models.item import Item
-
 from app.routers.categorias import router as categorias_router
-from app.routers.health import router as health_router
+from app.services.metrics_service import sync_active_items_gauge
 
 
 def create_app() -> FastAPI:
@@ -65,14 +62,14 @@ def create_app() -> FastAPI:
     # Middlewares globales
     # -------------------------------------------------------------
     app.add_middleware(SlowAPIMiddleware)
-    app.add_middleware(AuditContextMiddleware)      # Contexto para auditoría
+    app.add_middleware(AuditContextMiddleware)  # Contexto para auditoría
     app.add_middleware(ThreatDetectionMiddleware)  # Detección de amenazas
     app.add_middleware(ContentTypeValidationMiddleware)  # Validación de Content-Type
-    app.add_middleware(DynamicCORSMiddleware)     # CORS dinámico basado en DB
-    app.add_middleware(SecurityHeadersMiddleware)   # Encabezados de seguridad
-    app.add_middleware(RequestLoggingMiddleware)   # Logging detallado de requests/responses
-    app.add_middleware(RequestIdMiddleware)     # Asignación de request_id para trazabilidad
-    app.add_middleware(SQLInjectionWarningMiddleware) # Detección de patrones de inyección SQL en inputs
+    app.add_middleware(DynamicCORSMiddleware)  # CORS dinámico basado en DB
+    app.add_middleware(SecurityHeadersMiddleware)  # Encabezados de seguridad
+    app.add_middleware(RequestLoggingMiddleware)  # Logging detallado de requests/responses
+    app.add_middleware(RequestIdMiddleware)  # Asignación de request_id para trazabilidad
+    app.add_middleware(SQLInjectionWarningMiddleware)  # Detección de patrones de inyección SQL en inputs
 
     # -------------------------------------------------------------
     # Base de datos
@@ -82,9 +79,17 @@ def create_app() -> FastAPI:
     Base.metadata.create_all(bind=engine)
 
     # -------------------------------------------------------------
+    # Inicialización de métricas de negocio
+    # -------------------------------------------------------------
+    db = SessionLocal()
+    try:
+        sync_active_items_gauge(db)
+    finally:
+        db.close()
+
+    # -------------------------------------------------------------
     # Exception handlers
     # -------------------------------------------------------------
-
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         """
@@ -169,11 +174,24 @@ def create_app() -> FastAPI:
     # -------------------------------------------------------------
     # Routers
     # -------------------------------------------------------------
+    # Health en raíz para compatibilidad con tests viejos: /health
     app.include_router(health_router)
+
+    # Resto de routers
     app.include_router(categorias_router)
     app.include_router(version_router, prefix="/api")
     app.include_router(api_router_v1, prefix="/api/v1")
     app.include_router(api_router_v2, prefix="/api/v2")
+
+    # -------------------------------------------------------------
+    # Prometheus metrics
+    # Expone /metrics automáticamente
+    # -------------------------------------------------------------
+    Instrumentator().instrument(app).expose(
+        app,
+        endpoint="/metrics",
+        include_in_schema=False,
+    )
 
     return app
 
