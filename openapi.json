@@ -1,0 +1,3593 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "API JMV",
+    "description": "API JMV - FastAPI + SQLAlchemy + buenas prácticas.\n\nIncluye autenticación JWT, RBAC, rate limiting, caché con Redis, auditoría, sanitización, detección de payloads sospechosos, CORS dinámico, métricas Prometheus y tareas background con Celery.",
+    "contact": {
+      "name": "Equipo Backend",
+      "email": "dev@empresa.com"
+    },
+    "license": {
+      "name": "MIT"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Healthcheck",
+        "description": "Verifica el estado de salud de la API y sus dependencias críticas.",
+        "operationId": "healthcheck_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categorias/": {
+      "post": {
+        "tags": [
+          "categorias"
+        ],
+        "summary": "Crear categoría",
+        "description": "Crea una nueva categoría.\n\nReglas:\n- nombre debe ser único",
+        "operationId": "crear_categoria_categorias__post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoriaCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CategoriaResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "categorias"
+        ],
+        "summary": "Listar categorías",
+        "description": "Lista todas las categorías.",
+        "operationId": "listar_categorias_categorias__get",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_CategoriaResponse__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/categorias/{categoria_id}": {
+      "get": {
+        "tags": [
+          "categorias"
+        ],
+        "summary": "Obtener categoría por ID",
+        "description": "Obtiene una categoría por su ID.",
+        "operationId": "obtener_categoria_categorias__categoria_id__get",
+        "parameters": [
+          {
+            "name": "categoria_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Categoria Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CategoriaResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "categorias"
+        ],
+        "summary": "Actualizar categoría",
+        "description": "Actualiza una categoría existente.",
+        "operationId": "actualizar_categoria_categorias__categoria_id__put",
+        "parameters": [
+          {
+            "name": "categoria_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Categoria Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoriaUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CategoriaResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "categorias"
+        ],
+        "summary": "Eliminar categoría",
+        "description": "Elimina una categoría por ID.\n\nNota:\n- Esta eliminación es física.",
+        "operationId": "eliminar_categoria_categorias__categoria_id__delete",
+        "parameters": [
+          {
+            "name": "categoria_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Categoria Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [
+          "API Version"
+        ],
+        "summary": "Get Api Version",
+        "description": "Devuelve información básica de versión de la API.\n\nCampos:\n- current_version: versión actual recomendada\n- supported_versions: versiones soportadas\n- build_date: fecha de build/despliegue\n- environment: ambiente actual",
+        "operationId": "get_api_version_api_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/": {
+      "post": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Crear item",
+        "description": "Crea un item individual.\n\nCaché:\n- Al crear un item nuevo, invalidamos primeras páginas del listado,\n  porque son las que más probablemente cambien.\n\nMétricas:\n- Incrementa contador por categoría.\n- Sincroniza gauge de items activos.",
+        "operationId": "crear_item_api_v1_items__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ItemRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Listar items con filtros, búsqueda, orden y paginación (solo activos)",
+        "description": "Lista items activos con filtros, orden y paginación usando AsyncSession.\n\nCaché:\n- Usa cache key basada en filtros + page.\n- Si existe en Redis => X-Cache: HIT\n- Si no existe => consulta BD async, guarda en Redis => X-Cache: MISS",
+        "operationId": "listar_items_api_v1_items__get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Página (>=1)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Página (>=1)"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Tamaño de página (1-100)",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "Tamaño de página (1-100)"
+          },
+          {
+            "name": "nombre",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtra por nombre (contiene, case-insensitive)",
+              "title": "Nombre"
+            },
+            "description": "Filtra por nombre (contiene, case-insensitive)"
+          },
+          {
+            "name": "precio_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Precio mínimo (>=0)",
+              "title": "Precio Min"
+            },
+            "description": "Precio mínimo (>=0)"
+          },
+          {
+            "name": "precio_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Precio máximo (>=0)",
+              "title": "Precio Max"
+            },
+            "description": "Precio máximo (>=0)"
+          },
+          {
+            "name": "disponible",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: stock>0, false: stock<=0",
+              "title": "Disponible"
+            },
+            "description": "true: stock>0, false: stock<=0"
+          },
+          {
+            "name": "ordenar_por",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(precio_asc|precio_desc|nombre_asc|nombre_desc)?$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Orden: precio_asc, precio_desc, nombre_asc, nombre_desc",
+              "title": "Ordenar Por"
+            },
+            "description": "Orden: precio_asc, precio_desc, nombre_asc, nombre_desc"
+          },
+          {
+            "name": "creado_desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtra items creados desde esta fecha (YYYY-MM-DD)",
+              "title": "Creado Desde"
+            },
+            "description": "Filtra items creados desde esta fecha (YYYY-MM-DD)"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PaginatedResponse_ItemRead__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/bulk": {
+      "post": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Crear items en lote (máx 100) (transaccional)",
+        "description": "Crea múltiples items en una sola transacción.\n\nCaché:\n- Al insertar muchos items, invalidamos primeras páginas de listados.\n\nMétricas:\n- Incrementa contador de items creados.\n- Sincroniza gauge de items activos al finalizar.",
+        "operationId": "bulk_create_items_api_v1_items_bulk_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ItemRead__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Eliminar items en lote por IDs (soft delete) (máx 100)",
+        "description": "Elimina en lote usando soft delete.\n\nCaché:\n- Invalida caché individual y páginas relacionadas de cada item afectado.\n\nMétricas:\n- Sincroniza gauge de items activos tras el commit.",
+        "operationId": "bulk_delete_items_api_v1_items_bulk_delete",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDelete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Actualizar 'disponible' en lote (interpreta disponible como stock>0)",
+        "description": "Actualiza 'disponible' en lote.\n\nCaché:\n- Si cambia stock, invalidamos caché individual y páginas relacionadas.",
+        "operationId": "bulk_update_disponible_api_v1_items_bulk_put",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkUpdateDisponible"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/buscar": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Buscar items por nombre exacto de forma segura",
+        "description": "Búsqueda segura por nombre exacto usando ORM.",
+        "operationId": "buscar_items_api_v1_items_buscar_get",
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Nombre exacto del item",
+              "title": "Nombre"
+            },
+            "description": "Nombre exacto del item"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ItemRead__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/cursor": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Listar items con paginación por cursor (keyset pagination)",
+        "description": "Lista items activos usando paginación por cursor.",
+        "operationId": "listar_items_cursor_api_v1_items_cursor_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Último ID visto; 0 para iniciar",
+              "default": 0,
+              "title": "Cursor"
+            },
+            "description": "Último ID visto; 0 para iniciar"
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Cantidad máxima de items por página",
+              "default": 10,
+              "title": "Limite"
+            },
+            "description": "Cantidad máxima de items por página"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CursorPaginationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/eliminados": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Listar items eliminados (soft delete)",
+        "description": "Lista items eliminados lógicamente.",
+        "operationId": "listar_eliminados_api_v1_items_eliminados_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Página (>=1)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Página (>=1)"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Tamaño de página (1-100)",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "Tamaño de página (1-100)"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PaginatedResponse_ItemRead__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/ip": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Demo: obtener IP del cliente (dependency)",
+        "description": "Endpoint demo para probar dependency injection de IP.",
+        "operationId": "mi_ip_api_v1_items_ip_get",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Obtener item por ID",
+        "description": "Obtiene un item por ID usando patrón cache-aside.\n\nFlujo:\n1. Busca en Redis.\n2. Si existe: X-Cache=HIT\n3. Si no existe: consulta BD, guarda en Redis, X-Cache=MISS",
+        "operationId": "obtener_item_por_id_api_v1_items__item_id__get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ItemRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Eliminar item por ID (soft delete)",
+        "description": "Soft delete de un item individual.\n\nCaché:\n- Borra caché individual del item\n- Invalida páginas de listados relacionadas\n\nMétricas:\n- Sincroniza gauge de items activos.",
+        "operationId": "eliminar_item_api_v1_items__item_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}/historial": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Obtener historial de auditoría de un item",
+        "description": "Obtiene todos los registros de auditoría de un item específico,\nordenados cronológicamente.",
+        "operationId": "obtener_historial_item_api_v1_items__item_id__historial_get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_dict__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}/estado": {
+      "get": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Reconstruir estado de un item en una fecha específica",
+        "description": "Reconstruye el estado de un item en una fecha específica\nusando los registros de auditoría hasta ese momento.",
+        "operationId": "obtener_estado_item_en_fecha_api_v1_items__item_id__estado_get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "fecha",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Fecha y hora en formato ISO 8601",
+              "title": "Fecha"
+            },
+            "description": "Fecha y hora en formato ISO 8601"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}/restaurar": {
+      "post": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Restaurar item eliminado (soft delete)",
+        "description": "Restaura un item previamente eliminado.\n\nCaché:\n- Borra caché individual del item\n- Invalida páginas relacionadas para que reaparezca donde corresponda\n\nMétricas:\n- Sincroniza gauge de items activos.",
+        "operationId": "restaurar_item_api_v1_items__item_id__restaurar_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ItemRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/transferir-stock": {
+      "post": {
+        "tags": [
+          "Items"
+        ],
+        "summary": "Transferir Stock",
+        "description": "Transfiere stock entre dos items de forma atómica.\n\nCaché:\n- Invalida caché de item origen y destino\n- Invalida páginas relacionadas porque cambió stock",
+        "operationId": "transferir_stock_api_v1_items_transferir_stock_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferirStockRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Login de usuario con JWT",
+        "description": "Autentica un usuario por email y password y retorna access/refresh tokens.\n\nSeguridad adicional:\n- Bloqueo temporal después de 5 intentos fallidos",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Renovar access token con refresh token",
+        "description": "Recibe un refresh_token válido y devuelve un nuevo access_token.",
+        "operationId": "refresh_token_api_v1_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cambiar-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Cambiar contraseña autenticado",
+        "description": "Cambia la contraseña requiriendo la contraseña actual.",
+        "operationId": "cambiar_password_api_v1_auth_cambiar_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CambiarPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Solicitar recuperación de contraseña",
+        "description": "Genera token de recuperación de un solo uso con expiración de 1 hora.\n\nPor ahora:\n- no envía email real\n- solo lo imprime en consola/log",
+        "operationId": "forgot_password_api_v1_auth_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Restablecer contraseña con token",
+        "description": "Usa un token único y temporal para establecer una nueva contraseña.",
+        "operationId": "reset_password_api_v1_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/configuracion-cors/": {
+      "get": {
+        "tags": [
+          "CORS Admin",
+          "Configuración CORS"
+        ],
+        "summary": "Listar Origins",
+        "operationId": "listar_origins_api_v1_configuracion_cors__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ConfiguracionCorsRead__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "CORS Admin",
+          "Configuración CORS"
+        ],
+        "summary": "Agregar Origin",
+        "operationId": "agregar_origin_api_v1_configuracion_cors__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfiguracionCorsCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ConfiguracionCorsRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/configuracion-cors/{cors_id}": {
+      "delete": {
+        "tags": [
+          "CORS Admin",
+          "Configuración CORS"
+        ],
+        "summary": "Eliminar Origin",
+        "operationId": "eliminar_origin_api_v1_configuracion_cors__cors_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cors_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Cors Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Healthcheck",
+        "description": "Verifica el estado de salud de la API y sus dependencias críticas.",
+        "operationId": "healthcheck_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/usuarios/": {
+      "post": {
+        "tags": [
+          "Usuarios"
+        ],
+        "summary": "Registrar usuario",
+        "description": "Registra un usuario nuevo.\n\nSeguridad:\n- Hashea la contraseña antes de guardar\n- Nunca guarda la contraseña en texto plano",
+        "operationId": "registrar_usuario_api_v1_usuarios__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsuarioCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsuarioRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/cache/stats": {
+      "get": {
+        "tags": [
+          "Admin Cache",
+          "Admin Cache"
+        ],
+        "summary": "Obtener estadísticas de Redis",
+        "operationId": "cache_stats_api_v1_admin_cache_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/reportes/stock-bajo": {
+      "get": {
+        "tags": [
+          "Reportes"
+        ],
+        "summary": "Listar reportes de stock bajo",
+        "operationId": "listar_reportes_stock_bajo_api_v1_reportes_stock_bajo_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_dict__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/items/": {
+      "get": {
+        "tags": [
+          "Items v2"
+        ],
+        "summary": "Listar items (v2) con precio con IVA",
+        "description": "Lista items activos con filtros, ordenamiento y paginación (v2).\n\nDiferencia con v1:\n- Se agrega el campo `precio_con_iva`\n\nFórmula aplicada:\n    precio_con_iva = price * 1.16\n\nEl resto del comportamiento permanece igual para mantener\nconsistencia entre versiones.",
+        "operationId": "listar_items_v2_api_v2_items__get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Página (>=1)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Página (>=1)"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Tamaño de página (1-100)",
+              "default": 10,
+              "title": "Page Size"
+            },
+            "description": "Tamaño de página (1-100)"
+          },
+          {
+            "name": "nombre",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtra por nombre (contiene, case-insensitive)",
+              "title": "Nombre"
+            },
+            "description": "Filtra por nombre (contiene, case-insensitive)"
+          },
+          {
+            "name": "precio_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Precio mínimo (>=0)",
+              "title": "Precio Min"
+            },
+            "description": "Precio mínimo (>=0)"
+          },
+          {
+            "name": "precio_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Precio máximo (>=0)",
+              "title": "Precio Max"
+            },
+            "description": "Precio máximo (>=0)"
+          },
+          {
+            "name": "disponible",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: stock>0, false: stock<=0",
+              "title": "Disponible"
+            },
+            "description": "true: stock>0, false: stock<=0"
+          },
+          {
+            "name": "ordenar_por",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(precio_asc|precio_desc|nombre_asc|nombre_desc)?$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Orden: precio_asc, precio_desc, nombre_asc, nombre_desc",
+              "title": "Ordenar Por"
+            },
+            "description": "Orden: precio_asc, precio_desc, nombre_asc, nombre_desc"
+          },
+          {
+            "name": "creado_desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtra items creados desde esta fecha (YYYY-MM-DD)",
+              "title": "Creado Desde"
+            },
+            "description": "Filtra items creados desde esta fecha (YYYY-MM-DD)"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PaginatedResponse_ItemReadV2__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/items/cursor": {
+      "get": {
+        "tags": [
+          "Items v2"
+        ],
+        "summary": "Listar items con paginación por cursor (keyset pagination)",
+        "description": "Lista items activos usando paginación por cursor.\n\nReglas:\n- Solo devuelve items con id > cursor\n- Ordena por id ascendente\n- Retorna next_cursor basado en el último item devuelto\n- has_more indica si hay más resultados después de esta página",
+        "operationId": "listar_items_cursor_api_v2_items_cursor_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Último ID visto; 0 para iniciar",
+              "default": 0,
+              "title": "Cursor"
+            },
+            "description": "Último ID visto; 0 para iniciar"
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Cantidad máxima de items por página",
+              "default": 10,
+              "title": "Limite"
+            },
+            "description": "Cantidad máxima de items por página"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CursorPaginationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/items/transferir-stock": {
+      "post": {
+        "tags": [
+          "Items v2"
+        ],
+        "summary": "Transferir Stock",
+        "description": "Transfiere stock entre dos items de forma atómica.\n\nLa operación valida existencia, stock suficiente y registra auditoría\nen la misma transacción.",
+        "operationId": "transferir_stock_api_v2_items_transferir_stock_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferirStockRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponse_CategoriaResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CategoriaResponse"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[CategoriaResponse]"
+      },
+      "ApiResponse_ConfiguracionCorsRead_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ConfiguracionCorsRead"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[ConfiguracionCorsRead]"
+      },
+      "ApiResponse_CursorPaginationResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CursorPaginationResponse"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[CursorPaginationResponse]"
+      },
+      "ApiResponse_ItemRead_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ItemRead"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[ItemRead]"
+      },
+      "ApiResponse_PaginatedResponse_ItemReadV2__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PaginatedResponse_ItemReadV2_"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[PaginatedResponse[ItemReadV2]]"
+      },
+      "ApiResponse_PaginatedResponse_ItemRead__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PaginatedResponse_ItemRead_"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[PaginatedResponse[ItemRead]]"
+      },
+      "ApiResponse_dict_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[dict]"
+      },
+      "ApiResponse_list_CategoriaResponse__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CategoriaResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[list[CategoriaResponse]]"
+      },
+      "ApiResponse_list_ConfiguracionCorsRead__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ConfiguracionCorsRead"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[list[ConfiguracionCorsRead]]"
+      },
+      "ApiResponse_list_ItemRead__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ItemRead"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[list[ItemRead]]"
+      },
+      "ApiResponse_list_dict__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "data"
+        ],
+        "title": "ApiResponse[list[dict]]"
+      },
+      "BulkCreate": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemCreate"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "BulkCreate"
+      },
+      "BulkDelete": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "BulkDelete"
+      },
+      "BulkUpdateDisponible": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ids"
+          },
+          "disponible": {
+            "type": "boolean",
+            "title": "Disponible"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids",
+          "disponible"
+        ],
+        "title": "BulkUpdateDisponible"
+      },
+      "CambiarPasswordRequest": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "CambiarPasswordRequest",
+        "description": "Schema para cambio de contraseña autenticado."
+      },
+      "CategoriaCreate": {
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Nombre",
+            "description": "Nombre único de la categoría"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion",
+            "description": "Descripción opcional"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nombre"
+        ],
+        "title": "CategoriaCreate",
+        "description": "Schema para crear una categoría."
+      },
+      "CategoriaResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "nombre": {
+            "type": "string",
+            "title": "Nombre"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion"
+          },
+          "creado_en": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Creado En"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "nombre",
+          "creado_en"
+        ],
+        "title": "CategoriaResponse",
+        "description": "Schema de salida para categorías."
+      },
+      "CategoriaUpdate": {
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nombre"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion"
+          }
+        },
+        "type": "object",
+        "title": "CategoriaUpdate",
+        "description": "Schema para actualizar una categoría.\n\nTodos los campos son opcionales para permitir updates parciales."
+      },
+      "ConfiguracionCorsCreate": {
+        "properties": {
+          "origin": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Origin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "origin"
+        ],
+        "title": "ConfiguracionCorsCreate"
+      },
+      "ConfiguracionCorsRead": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "activo": {
+            "type": "boolean",
+            "title": "Activo"
+          },
+          "creado_en": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Creado En"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "origin",
+          "activo",
+          "creado_en"
+        ],
+        "title": "ConfiguracionCorsRead"
+      },
+      "CursorPaginationResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "has_more"
+        ],
+        "title": "CursorPaginationResponse",
+        "description": "Respuesta de paginación por cursor.\n\n- items: elementos de la página actual\n- next_cursor: id del último item retornado, o None si ya no hay más\n- has_more: indica si existe una siguiente página"
+      },
+      "ForgotPasswordRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "ForgotPasswordRequest",
+        "description": "Schema para solicitar recuperación de contraseña."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ItemCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Nombre del item"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Price",
+            "description": "Precio > 0"
+          },
+          "stock": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Stock",
+            "description": "Stock disponible (>=0)",
+            "default": 0
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku",
+            "description": "SKU libre (legacy)"
+          },
+          "codigo_sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Sku",
+            "description": "SKU opcional con formato AB-1234",
+            "examples": [
+              "AB-1234"
+            ]
+          },
+          "categoria_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoria Id",
+            "description": "ID de la categoría asociada"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "price"
+        ],
+        "title": "ItemCreate",
+        "description": "Schema de entrada para crear un item.\n\nIncluye validaciones de:\n- nombre\n- descripción\n- precio\n- codigo_sku\n- stock\n- categoria_id opcional\n\nSanitización aplicada:\n- name\n- description"
+      },
+      "ItemRead": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "codigo_sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Sku"
+          },
+          "stock": {
+            "type": "integer",
+            "title": "Stock"
+          },
+          "categoria_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoria Id"
+          },
+          "categoria": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoriaResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eliminado": {
+            "type": "boolean",
+            "title": "Eliminado"
+          },
+          "eliminado_en": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eliminado En"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "price",
+          "stock",
+          "eliminado"
+        ],
+        "title": "ItemRead",
+        "description": "Schema de salida para items."
+      },
+      "ItemReadV2": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "codigo_sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Sku"
+          },
+          "stock": {
+            "type": "integer",
+            "title": "Stock"
+          },
+          "categoria_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoria Id"
+          },
+          "categoria": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoriaResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eliminado": {
+            "type": "boolean",
+            "title": "Eliminado"
+          },
+          "eliminado_en": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eliminado En"
+          },
+          "precio_con_iva": {
+            "type": "number",
+            "title": "Precio Con Iva"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "price",
+          "stock",
+          "eliminado",
+          "precio_con_iva"
+        ],
+        "title": "ItemReadV2",
+        "description": "Schema de salida para items en v2."
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "description": "Schema para login."
+      },
+      "PaginatedResponse_ItemReadV2_": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemReadV2"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "page_size",
+          "total",
+          "items"
+        ],
+        "title": "PaginatedResponse[ItemReadV2]"
+      },
+      "PaginatedResponse_ItemRead_": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemRead"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "page_size",
+          "total",
+          "items"
+        ],
+        "title": "PaginatedResponse[ItemRead]"
+      },
+      "RefreshTokenRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshTokenRequest",
+        "description": "Schema para refrescar access token."
+      },
+      "ResetPasswordRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest",
+        "description": "Schema para restablecer contraseña con token."
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "TokenResponse",
+        "description": "Respuesta estándar de tokens JWT."
+      },
+      "TransferirStockRequest": {
+        "properties": {
+          "item_origen_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Item Origen Id"
+          },
+          "item_destino_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Item Destino Id"
+          },
+          "cantidad": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Cantidad"
+          },
+          "usuario": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Usuario",
+            "default": "system"
+          },
+          "forzar_error": {
+            "type": "boolean",
+            "title": "Forzar Error",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_origen_id",
+          "item_destino_id",
+          "cantidad"
+        ],
+        "title": "TransferirStockRequest",
+        "description": "Request para transferir stock entre dos items."
+      },
+      "UsuarioCreate": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "title": "Password"
+          },
+          "rol": {
+            "type": "string",
+            "title": "Rol",
+            "default": "lector"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "UsuarioCreate",
+        "description": "Schema para registro de usuarios."
+      },
+      "UsuarioRead": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "activo": {
+            "type": "boolean",
+            "title": "Activo"
+          },
+          "rol": {
+            "type": "string",
+            "title": "Rol"
+          },
+          "failed_login_attempts": {
+            "type": "integer",
+            "title": "Failed Login Attempts"
+          },
+          "blocked_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Until"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "activo",
+          "rol",
+          "failed_login_attempts",
+          "created_at"
+        ],
+        "title": "UsuarioRead",
+        "description": "Schema de salida segura para usuarios.\nNunca expone hashed_password."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Items",
+      "description": "Operaciones sobre items de inventario: creación, consulta, filtros, paginación, soft delete, restauración, auditoría y movimientos de stock.",
+      "externalDocs": {
+        "description": "Guía funcional de items",
+        "url": "https://example.com/docs/items"
+      }
+    },
+    {
+      "name": "Auth",
+      "description": "Autenticación y autorización con JWT, refresh token y control de acceso por roles.",
+      "externalDocs": {
+        "description": "Guía de autenticación",
+        "url": "https://example.com/docs/auth"
+      }
+    },
+    {
+      "name": "CORS Admin",
+      "description": "Administración dinámica de orígenes permitidos para CORS desde base de datos."
+    },
+    {
+      "name": "Health",
+      "description": "Healthchecks, disponibilidad del servicio y endpoints de diagnóstico."
+    },
+    {
+      "name": "Usuarios",
+      "description": "Gestión de usuarios, roles y operaciones relacionadas con identidad del sistema."
+    },
+    {
+      "name": "Admin Cache",
+      "description": "Administración de caché Redis, invalidación y diagnóstico de almacenamiento temporal."
+    },
+    {
+      "name": "Reportes",
+      "description": "Endpoints de reportes operativos y procesos asociados a stock y tareas de background."
+    }
+  ]
+}

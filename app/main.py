@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from scalar_fastapi import get_scalar_api_reference
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -32,6 +33,71 @@ from app.routers.categorias import router as categorias_router
 from app.services.metrics_service import sync_active_items_gauge
 
 
+# =========================================================
+# Metadata de tags para OpenAPI / Swagger / ReDoc / Scalar
+# =========================================================
+OPENAPI_TAGS = [
+    {
+        "name": "Items",
+        "description": (
+            "Operaciones sobre items de inventario: creación, consulta, "
+            "filtros, paginación, soft delete, restauración, auditoría "
+            "y movimientos de stock."
+        ),
+        "externalDocs": {
+            "description": "Guía funcional de items",
+            "url": "https://example.com/docs/items",
+        },
+    },
+    {
+        "name": "Auth",
+        "description": (
+            "Autenticación y autorización con JWT, refresh token "
+            "y control de acceso por roles."
+        ),
+        "externalDocs": {
+            "description": "Guía de autenticación",
+            "url": "https://example.com/docs/auth",
+        },
+    },
+    {
+        "name": "CORS Admin",
+        "description": (
+            "Administración dinámica de orígenes permitidos para CORS "
+            "desde base de datos."
+        ),
+    },
+    {
+        "name": "Health",
+        "description": (
+            "Healthchecks, disponibilidad del servicio y endpoints "
+            "de diagnóstico."
+        ),
+    },
+    {
+        "name": "Usuarios",
+        "description": (
+            "Gestión de usuarios, roles y operaciones relacionadas "
+            "con identidad del sistema."
+        ),
+    },
+    {
+        "name": "Admin Cache",
+        "description": (
+            "Administración de caché Redis, invalidación y diagnóstico "
+            "de almacenamiento temporal."
+        ),
+    },
+    {
+        "name": "Reportes",
+        "description": (
+            "Endpoints de reportes operativos y procesos asociados "
+            "a stock y tareas de background."
+        ),
+    },
+]
+
+
 def create_app() -> FastAPI:
     """
     Factory principal de la aplicación FastAPI.
@@ -43,13 +109,31 @@ def create_app() -> FastAPI:
     - Crear tablas en desarrollo
     - Registrar exception handlers
     - Incluir routers versionados y utilitarios
+    - Exponer documentación enriquecida
     """
     setup_logging()
 
     app = FastAPI(
         title=settings.APP_NAME,
         version="1.0.0",
-        description="API JMV - FastAPI + SQLAlchemy + buenas prácticas",
+        description=(
+            "API JMV - FastAPI + SQLAlchemy + buenas prácticas.\n\n"
+            "Incluye autenticación JWT, RBAC, rate limiting, "
+            "caché con Redis, auditoría, sanitización, detección "
+            "de payloads sospechosos, CORS dinámico, métricas Prometheus "
+            "y tareas background con Celery."
+        ),
+        contact={
+            "name": "Equipo Backend",
+            "email": "dev@empresa.com",
+        },
+        license_info={
+            "name": "MIT",
+        },
+        openapi_tags=OPENAPI_TAGS,
+        docs_url="/docs",          # Swagger UI
+        redoc_url="/redoc",        # ReDoc
+        openapi_url="/openapi.json",
     )
 
     # -------------------------------------------------------------
@@ -67,15 +151,15 @@ def create_app() -> FastAPI:
     app.add_middleware(ContentTypeValidationMiddleware)  # Validación de Content-Type
     app.add_middleware(DynamicCORSMiddleware)  # CORS dinámico basado en DB
     app.add_middleware(SecurityHeadersMiddleware)  # Encabezados de seguridad
-    app.add_middleware(RequestLoggingMiddleware)  # Logging detallado de requests/responses
-    app.add_middleware(RequestIdMiddleware)  # Asignación de request_id para trazabilidad
-    app.add_middleware(SQLInjectionWarningMiddleware)  # Detección de patrones de inyección SQL en inputs
+    app.add_middleware(RequestLoggingMiddleware)  # Logging de requests/responses
+    app.add_middleware(RequestIdMiddleware)  # request_id para trazabilidad
+    app.add_middleware(SQLInjectionWarningMiddleware)  # Detección de patrones SQLi
 
     # -------------------------------------------------------------
     # Base de datos
     # -------------------------------------------------------------
-    # Importar modelos asegura que SQLAlchemy los registre en metadata
-    # antes de ejecutar create_all() en entorno local/desarrollo.
+    # En desarrollo/local crea tablas a partir de metadata.
+    # En producción el control real lo llevan Alembic + migraciones.
     Base.metadata.create_all(bind=engine)
 
     # -------------------------------------------------------------
@@ -169,6 +253,19 @@ def create_app() -> FastAPI:
                 },
                 "metadata": {"request_id": request_id} if request_id else {},
             },
+        )
+
+    # -------------------------------------------------------------
+    # Router adicional para Scalar
+    # -------------------------------------------------------------
+    @app.get("/scalar", include_in_schema=False)
+    async def scalar_docs() -> HTMLResponse:
+        """
+        Documentación moderna con Scalar.
+        """
+        return get_scalar_api_reference(
+            openapi_url=app.openapi_url,
+            title=f"{settings.APP_NAME} - Scalar",
         )
 
     # -------------------------------------------------------------
