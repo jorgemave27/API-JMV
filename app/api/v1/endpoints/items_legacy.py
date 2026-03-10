@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response,
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.cache import (
     build_item_cache_key,
@@ -442,6 +442,7 @@ async def listar_items(
     precio_min: Optional[float] = Query(None, ge=0, description="Precio mínimo (>=0)"),
     precio_max: Optional[float] = Query(None, ge=0, description="Precio máximo (>=0)"),
     disponible: Optional[bool] = Query(None, description="true: stock>0, false: stock<=0"),
+    categoria_id: Optional[int] = Query(None, ge=1, description="Filtra por categoría"),
     ordenar_por: Optional[str] = Query(
         None,
         description="Orden: precio_asc, precio_desc, nombre_asc, nombre_desc",
@@ -468,6 +469,7 @@ async def listar_items(
         "precio_min": precio_min,
         "precio_max": precio_max,
         "disponible": disponible,
+        "categoria_id": categoria_id,
         "ordenar_por": ordenar_por,
         "creado_desde": creado_desde.isoformat() if creado_desde else None,
     }
@@ -480,25 +482,44 @@ async def listar_items(
         response.headers["X-Cache"] = "HIT"
         return cached_page
 
-    stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
+    stmt = (
+        select(Item)
+        .options(selectinload(Item.categoria))
+        .where(Item.eliminado == False)  # noqa: E712
+    )
+
+    count_base_stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
 
     if nombre:
         stmt = stmt.where(Item.name.ilike(f"%{nombre}%"))
+        count_base_stmt = count_base_stmt.where(Item.name.ilike(f"%{nombre}%"))
 
     if precio_min is not None:
         stmt = stmt.where(Item.price >= precio_min)
+        count_base_stmt = count_base_stmt.where(Item.price >= precio_min)
 
     if precio_max is not None:
         stmt = stmt.where(Item.price <= precio_max)
+        count_base_stmt = count_base_stmt.where(Item.price <= precio_max)
 
     if disponible is not None:
-        stmt = stmt.where(Item.stock > 0) if disponible else stmt.where(Item.stock <= 0)
+        if disponible:
+            stmt = stmt.where(Item.stock > 0)
+            count_base_stmt = count_base_stmt.where(Item.stock > 0)
+        else:
+            stmt = stmt.where(Item.stock <= 0)
+            count_base_stmt = count_base_stmt.where(Item.stock <= 0)
+
+    if categoria_id is not None:
+        stmt = stmt.where(Item.categoria_id == categoria_id)
+        count_base_stmt = count_base_stmt.where(Item.categoria_id == categoria_id)
 
     if creado_desde is not None:
         dt = datetime.combine(creado_desde, time.min)
         stmt = stmt.where(Item.created_at >= dt)
+        count_base_stmt = count_base_stmt.where(Item.created_at >= dt)
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
+    count_stmt = select(func.count()).select_from(count_base_stmt.subquery())
     total_result = await db.execute(count_stmt)
     total = total_result.scalar_one()
 
@@ -548,7 +569,6 @@ async def listar_items(
 
     response.headers["X-Cache"] = "MISS"
     return payload
-
 
 @router.get(
     "/buscar",
@@ -727,6 +747,73 @@ def obtener_item_por_id(
     response.headers["X-Cache"] = "MISS"
     return payload
 
+@router.put(
+    "/{item_id}",
+    response_model=ApiResponse[ItemRead],
+    summary="Actualizar item por ID",
+    dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
+)
+def actualizar_item(
+    item_id: int,
+    payload: ItemCreate,
+    repo: ItemRepository = Depends(get_item_repo),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_role("admin", "editor")),
+):
+    """
+    Actualiza un item existente.
+
+    - Requiere rol admin o editor
+    - Mantiene auditoría vía contexto de usuario
+    - Invalida caché individual y de listados relacionados
+    """
+    _bind_audit_user(current_user)
+
+    item = repo.get_by_id(item_id)
+    if not item:
+        raise ItemNoEncontradoError(item_id)
+
+    categoria = None
+    if payload.categoria_id is not None:
+        categoria = (
+            db.execute(
+                select(Categoria).where(Categoria.id == payload.categoria_id)
+            )
+            .scalars()
+            .first()
+        )
+
+        if not categoria:
+            return error_response(
+                status_code=400,
+                message=f"La categoría con id={payload.categoria_id} no existe",
+            )
+
+    item.name = payload.name
+    item.description = payload.description
+    item.price = payload.price
+    item.sku = payload.sku
+    item.codigo_sku = payload.codigo_sku
+    item.stock = payload.stock
+    item.categoria_id = payload.categoria_id
+
+    item = repo.update(item)
+
+    sync_active_items_gauge(repo.db)
+
+    delete_cache(build_item_cache_key(item_id))
+    invalidate_list_caches_for_item(item_id, include_first_pages=True)
+
+    logger.info(
+        f"Item actualizado: id={item.id}, usuario={current_user.email}"
+    )
+
+    return ApiResponse[ItemRead](
+        success=True,
+        message="Item actualizado exitosamente",
+        data=ItemRead.model_validate(item),
+        metadata={},
+    )
 
 @router.get(
     "/{item_id}/historial",
