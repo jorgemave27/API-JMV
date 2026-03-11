@@ -17,8 +17,12 @@ def rate_limit_key_func(request: Request) -> str:
     Genera la clave para rate limiting.
 
     Reglas:
-    - Si existe un JWT válido, usa el user_id (claim 'sub')
+    - Si existe un JWT válido, usa el user_id / subject del token
     - Si no existe o no es válido, usa la IP del cliente
+
+    Nota:
+    - Evitamos `except Exception: pass` para no dejar silencios peligrosos
+      y para que Bandit no marque try/except/pass.
     """
     auth_header = request.headers.get("Authorization")
 
@@ -33,11 +37,12 @@ def rate_limit_key_func(request: Request) -> str:
 
             if user_id:
                 return f"user:{user_id}"
+
         except Exception:
-            pass
+            # Fallback explícito a IP si el token no existe, expiró o es inválido
+            return f"ip:{get_remote_address(request)}"
 
     return f"ip:{get_remote_address(request)}"
-
 
 def dynamic_rate_limit(key: str) -> str:
     """

@@ -27,6 +27,7 @@ ecdsa==0.19.1
 email-validator==2.3.0
 fastapi==0.135.1
 filelock==3.25.0
+flake8==7.3.0
 greenlet==3.3.2
 h11==0.16.0
 httpcore==1.0.9
@@ -40,6 +41,7 @@ limits==5.8.0
 Mako==1.3.10
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
+mccabe==0.7.0
 mdurl==0.1.2
 multidict==6.7.1
 nodeenv==1.10.0
@@ -58,10 +60,12 @@ propcache==0.4.1
 psutil==7.2.2
 psycopg2-binary==2.9.11
 pyasn1==0.6.2
+pycodestyle==2.14.0
 pycparser==3.0
 pydantic==2.12.5
 pydantic-settings==2.13.1
 pydantic_core==2.41.5
+pyflakes==3.4.0
 Pygments==2.19.2
 pytest==9.0.2
 pytest-asyncio==1.3.0
@@ -75,6 +79,7 @@ redis==6.4.0
 requests==2.32.5
 rich==14.3.3
 rsa==4.9.1
+ruff==0.15.5
 scalar_fastapi==1.8.0
 six==1.17.0
 slowapi==0.1.9

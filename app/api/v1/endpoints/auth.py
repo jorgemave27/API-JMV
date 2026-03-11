@@ -47,7 +47,7 @@ def login(
     Autentica un usuario por email y password y retorna access/refresh tokens.
 
     Seguridad adicional:
-    - Bloqueo temporal después de 5 intentos fallidos
+    - Bloqueo temporal después de múltiples intentos fallidos
     """
     user = db.query(Usuario).filter(Usuario.email == payload.email).first()
 
@@ -67,8 +67,8 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail=(
-                f"Cuenta bloqueada temporalmente. "
-                f"Intenta de nuevo más tarde."
+                "Cuenta bloqueada temporalmente. "
+                "Intenta de nuevo más tarde."
             ),
         )
 
@@ -84,7 +84,7 @@ def login(
     return TokenResponse(
         access_token=create_access_token(user.email),
         refresh_token=create_refresh_token(user.email),
-        token_type="bearer",
+        token_type="bearer",  # nosec B106
     )
 
 
@@ -98,14 +98,14 @@ def refresh_token(
     db: Session = Depends(get_db),
 ):
     """
-    Recibe un refresh_token válido y devuelve un nuevo access_token.
+    Recibe un refresh token válido y devuelve un nuevo access token.
     """
     token_payload = decode_token(payload.refresh_token)
 
     token_type = token_payload.get("type")
     subject = token_payload.get("sub")
 
-    if token_type != "refresh":
+    if token_type != "refresh":  # nosec B105
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Se requiere un refresh token válido",
@@ -128,7 +128,7 @@ def refresh_token(
     return TokenResponse(
         access_token=create_access_token(user.email),
         refresh_token=payload.refresh_token,
-        token_type="bearer",
+        token_type="bearer",  # nosec B106
     )
 
 
@@ -142,7 +142,8 @@ def cambiar_password(
     current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Cambia la contraseña requiriendo la contraseña actual.
+    Cambia la contraseña del usuario autenticado
+    requiriendo la contraseña actual.
     """
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(
@@ -172,11 +173,11 @@ def forgot_password(
     db: Session = Depends(get_db),
 ):
     """
-    Genera token de recuperación de un solo uso con expiración de 1 hora.
+    Genera token de recuperación de un solo uso con expiración controlada.
 
     Por ahora:
     - no envía email real
-    - solo lo imprime en consola/log
+    - solo imprime el token para pruebas/local
     """
     user = db.query(Usuario).filter(Usuario.email == payload.email).first()
 
