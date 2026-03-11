@@ -1,0 +1,82 @@
+version: "3.9"
+
+services:
+  api:
+    # -----------------------------------------------------
+    # Servicio principal de FastAPI
+    # -----------------------------------------------------
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: api-jmv-api
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
+      API_KEY: dev-secret-key-change-me
+      JWT_SECRET_KEY: super-secret-key-change-me-in-production
+      SECRET_KEY: super-secret-key-change-me-in-production
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      REDIS_URL: redis://redis:6379/0
+      CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
+  db:
+    # -----------------------------------------------------
+    # Base de datos PostgreSQL
+    # -----------------------------------------------------
+    image: postgres:15
+    container_name: api-jmv-db
+    environment:
+      POSTGRES_DB: api_jmv
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d api_jmv"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
+  redis:
+    # -----------------------------------------------------
+    # Redis para cache / broker / backend de Celery
+    # -----------------------------------------------------
+    image: redis:7-alpine
+    container_name: api-jmv-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  api_jmv_network:
+    driver: bridge

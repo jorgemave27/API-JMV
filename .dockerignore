@@ -1,0 +1,36 @@
+# Entorno virtual local
+
+venv/
+
+# Variables de entorno locales
+
+.env
+.env.\*
+
+# Caché de Python
+
+**pycache**/
+_.pyc
+_.pyo
+\*.pyd
+
+# Metadata de git
+
+.git
+.gitignore
+
+# Cachés y reportes locales
+
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.DS_Store
+
+# Bases locales
+
+_.sqlite3
+_.db
+database.db
