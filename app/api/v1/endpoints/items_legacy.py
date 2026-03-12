@@ -44,12 +44,46 @@ from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
 from app.services.metrics_service import sync_active_items_gauge
 from app.workers.tasks import enviar_notificacion
+from app.messaging.producer import RabbitMQProducer
 
 router = APIRouter()
 
 # Logger específico del módulo
 logger = logging.getLogger(__name__)
 
+def _publicar_evento_item(routing_key: str, payload: dict) -> None:
+    """
+    Publica un evento de item en RabbitMQ de forma segura.
+
+    Diseño:
+    - Si RabbitMQ falla, NO rompemos la operación principal del API.
+    - Solo registramos warning para no afectar UX ni tests.
+    """
+    import asyncio
+
+    rabbitmq_url = getattr(
+        settings,
+        "RABBITMQ_URL",
+        "amqp://guest:guest@rabbitmq:5672/",
+    )
+
+    async def _run():
+        producer = RabbitMQProducer(url=rabbitmq_url)
+        try:
+            await producer.publish(
+                "items_events",
+                routing_key,
+                payload,
+            )
+        finally:
+            await producer.close()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        logger.warning(
+            f"No se pudo publicar evento RabbitMQ ({routing_key}): {exc}"
+        )
 
 def _bind_audit_user(current_user: Usuario | None) -> None:
     """
@@ -85,6 +119,10 @@ def crear_item(
     Métricas:
     - Incrementa contador por categoría.
     - Sincroniza gauge de items activos.
+
+    Mensajería:
+    - Publica evento 'items.creado' en RabbitMQ sin romper la operación principal
+      si el broker no está disponible.
     """
     _bind_audit_user(current_user)
 
@@ -124,6 +162,14 @@ def crear_item(
 
     # Disparo de tarea en background con Celery
     enviar_notificacion.delay(item.id, "admin@empresa.com")
+
+    # ==========================================================
+    # Evento RabbitMQ
+    # ==========================================================
+    _publicar_evento_item(
+        "items.creado",
+        ItemRead.model_validate(item).model_dump(mode="json"),
+    )
 
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
@@ -766,6 +812,10 @@ def actualizar_item(
     - Requiere rol admin o editor
     - Mantiene auditoría vía contexto de usuario
     - Invalida caché individual y de listados relacionados
+
+    Mensajería:
+    - Publica evento 'items.actualizado' en RabbitMQ sin romper la operación principal
+      si el broker no está disponible.
     """
     _bind_audit_user(current_user)
 
@@ -803,6 +853,14 @@ def actualizar_item(
 
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
+
+    # ==========================================================
+    # Evento RabbitMQ
+    # ==========================================================
+    _publicar_evento_item(
+        "items.actualizado",
+        ItemRead.model_validate(item).model_dump(mode="json"),
+    )
 
     logger.info(
         f"Item actualizado: id={item.id}, usuario={current_user.email}"
@@ -933,6 +991,10 @@ def eliminar_item(
 
     Métricas:
     - Sincroniza gauge de items activos.
+
+    Mensajería:
+    - Publica evento 'items.eliminado' en RabbitMQ sin romper la operación principal
+      si el broker no está disponible.
     """
     _bind_audit_user(current_user)
 
@@ -962,6 +1024,20 @@ def eliminar_item(
     # Invalidación de caché después del delete
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
+
+    # ==========================================================
+    # Evento RabbitMQ
+    # ==========================================================
+    _publicar_evento_item(
+        "items.eliminado",
+        {
+            "id": item.id,
+            "name": item.name,
+            "sku": item.sku,
+            "codigo_sku": item.codigo_sku,
+            "eliminado": True,
+        },
+    )
 
     logger.info(
         f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"

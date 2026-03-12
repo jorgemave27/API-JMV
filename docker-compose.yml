@@ -21,6 +21,7 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     depends_on:
       db:
@@ -86,6 +87,22 @@ services:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - api
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
+  rabbitmq:
+    # -----------------------------------------------------
+    # RabbitMQ Message Broker
+    # -----------------------------------------------------
+    image: rabbitmq:3-management
+    container_name: api-jmv-rabbitmq
+    ports:
+      - "5672:5672" # AMQP
+      - "15672:15672" # Panel administración
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     networks:
       - api_jmv_network
     restart: unless-stopped
