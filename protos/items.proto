@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package items;
+
+service ItemService {
+  rpc GetItem (ItemRequest) returns (ItemResponse);
+  rpc ListItems (ListRequest) returns (stream ItemResponse);
+}
+
+message ItemRequest {
+  int32 item_id = 1;
+}
+
+message ListRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ItemResponse {
+  int32 id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  string sku = 5;
+  string codigo_sku = 6;
+  int32 stock = 7;
+  bool eliminado = 8;
+  string eliminado_en = 9;
+  int32 categoria_id = 10;
+}
