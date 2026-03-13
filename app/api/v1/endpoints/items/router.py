@@ -2,17 +2,20 @@
 Router agregador de items.
 
 FASE SEGURA:
-- Por ahora reutilizamos el router legacy completo.
-- Así NO cambian rutas, NO cambian tests y NO cambia la API pública.
-- Después podremos mover endpoints por módulos sin romper imports.
+- Se mantiene el router legacy como API pública principal
+- Se agrega router CQRS bajo prefijo /cqrs para no romper tests existentes
+- Así podemos avanzar en la tarea 56 sin destruir compatibilidad
 """
 
 from fastapi import APIRouter
 
-# Importamos el router original renombrado
 from app.api.v1.endpoints.items_legacy import router as legacy_router
+from app.api.v1.endpoints.items_cqrs import router as cqrs_router
 
 router = APIRouter()
 
-# Incluye todas las rutas legacy exactamente como estaban
+# API pública existente (tests actuales dependen de esto)
 router.include_router(legacy_router)
+
+# Nueva API CQRS sin romper compatibilidad
+router.include_router(cqrs_router, prefix="/cqrs")

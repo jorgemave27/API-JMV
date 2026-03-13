@@ -50,6 +50,37 @@ services:
       - api_jmv_network
     restart: unless-stopped
 
+  projection-consumer:
+    # -----------------------------------------------------
+    # Consumer CQRS: actualiza items_lectura desde Kafka
+    # -----------------------------------------------------
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: api-jmv-projection-consumer
+    command: python -m app.consumers.items_projection_consumer
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
+      API_KEY: dev-secret-key-change-me
+      JWT_SECRET_KEY: super-secret-key-change-me-in-production
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: api-jmv-projection-consumer
+      KAFKA_EVENTS_TOPIC: jmv.domain-events
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
   db:
     # -----------------------------------------------------
     # Base de datos PostgreSQL
