@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
+    # Kafka / Event Sourcing
+    KAFKA_ENABLED: bool = True
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_CLIENT_ID: str = "api-jmv"
+    KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
+
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
         env_file_encoding="utf-8",

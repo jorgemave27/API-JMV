@@ -30,6 +30,8 @@ from app.core.responses import error_response
 from app.core.security import verify_api_key, require_role
 from app.database.database import get_db, get_db_async
 from app.dependencies import get_item_repo
+from app.messaging.kafka_publisher import publish_domain_event
+from app.messaging.producer import RabbitMQProducer
 from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.item import Item
@@ -39,17 +41,18 @@ from app.repositories.item_repository import ItemRepository
 from app.schemas.base import ApiResponse
 from app.schemas.bulk import BulkCreate, BulkDelete, BulkUpdateDisponible
 from app.schemas.cursor_pagination import CursorPaginationResponse
+from app.schemas.domain_event import DomainEvent
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
 from app.services.metrics_service import sync_active_items_gauge
 from app.workers.tasks import enviar_notificacion
-from app.messaging.producer import RabbitMQProducer
 
 router = APIRouter()
 
 # Logger específico del módulo
 logger = logging.getLogger(__name__)
+
 
 def _publicar_evento_item(routing_key: str, payload: dict) -> None:
     """
@@ -85,6 +88,7 @@ def _publicar_evento_item(routing_key: str, payload: dict) -> None:
             f"No se pudo publicar evento RabbitMQ ({routing_key}): {exc}"
         )
 
+
 def _bind_audit_user(current_user: Usuario | None) -> None:
     """
     Guarda el user_id actual en el contexto de auditoría.
@@ -93,6 +97,44 @@ def _bind_audit_user(current_user: Usuario | None) -> None:
     quién hizo el cambio, sin pasar user_id manualmente hasta el modelo.
     """
     set_current_user_id(current_user.id if current_user else None)
+
+
+def _build_event_metadata(current_user: Usuario | None) -> dict:
+    """
+    Construye metadata estándar para eventos de dominio.
+
+    Se usa para trazabilidad de eventos Kafka sin acoplar demasiado
+    la capa HTTP a la mensajería.
+    """
+    return {
+        "source": "api-jmv",
+        "user_id": current_user.id if current_user else None,
+        "user_email": current_user.email if current_user else None,
+    }
+
+
+def _publicar_evento_item_kafka(
+    event_type: str,
+    aggregate_id: int,
+    payload: dict,
+    current_user: Usuario | None = None,
+) -> None:
+    """
+    Publica un evento de dominio en Kafka de forma segura.
+
+    Diseño:
+    - Si Kafka falla, NO rompe la operación principal del endpoint.
+    - Usa un esquema estándar DomainEvent.
+    """
+    event = DomainEvent(
+        event_type=event_type,
+        aggregate_type="item",
+        aggregate_id=str(aggregate_id),
+        payload=payload,
+        metadata=_build_event_metadata(current_user),
+    )
+
+    publish_domain_event(event)
 
 
 @router.post(
@@ -123,6 +165,7 @@ def crear_item(
     Mensajería:
     - Publica evento 'items.creado' en RabbitMQ sin romper la operación principal
       si el broker no está disponible.
+    - Publica también evento de dominio en Kafka para la tarea 54.
     """
     _bind_audit_user(current_user)
 
@@ -164,11 +207,21 @@ def crear_item(
     enviar_notificacion.delay(item.id, "admin@empresa.com")
 
     # ==========================================================
-    # Evento RabbitMQ
+    # Evento RabbitMQ (integración actual)
     # ==========================================================
     _publicar_evento_item(
         "items.creado",
         ItemRead.model_validate(item).model_dump(mode="json"),
+    )
+
+    # ==========================================================
+    # Evento Kafka (tarea 54)
+    # ==========================================================
+    _publicar_evento_item_kafka(
+        event_type="item.created",
+        aggregate_id=item.id,
+        payload=ItemRead.model_validate(item).model_dump(mode="json"),
+        current_user=current_user,
     )
 
     logger.info(f"Item creado: id={item.id}, nombre={item.name}")
@@ -201,6 +254,10 @@ def bulk_create_items(
     Métricas:
     - Incrementa contador de items creados.
     - Sincroniza gauge de items activos al finalizar.
+
+    Nota:
+    - En esta primera fase de Kafka no publicamos eventos por bulk
+      para mantener la integración simple y estable.
     """
     _bind_audit_user(current_user)
 
@@ -314,6 +371,9 @@ def bulk_delete_items(
 
     Métricas:
     - Sincroniza gauge de items activos tras el commit.
+
+    Nota:
+    - En esta primera fase de Kafka no publicamos eventos por bulk.
     """
     try:
         now = datetime.now()
@@ -395,6 +455,9 @@ def bulk_update_disponible(
 
     Caché:
     - Si cambia stock, invalidamos caché individual y páginas relacionadas.
+
+    Nota:
+    - En esta primera fase de Kafka no publicamos eventos por bulk.
     """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
@@ -616,6 +679,7 @@ async def listar_items(
     response.headers["X-Cache"] = "MISS"
     return payload
 
+
 @router.get(
     "/buscar",
     response_model=ApiResponse[list[ItemRead]],
@@ -793,6 +857,7 @@ def obtener_item_por_id(
     response.headers["X-Cache"] = "MISS"
     return payload
 
+
 @router.put(
     "/{item_id}",
     response_model=ApiResponse[ItemRead],
@@ -816,6 +881,7 @@ def actualizar_item(
     Mensajería:
     - Publica evento 'items.actualizado' en RabbitMQ sin romper la operación principal
       si el broker no está disponible.
+    - Publica también evento de dominio en Kafka para la tarea 54.
     """
     _bind_audit_user(current_user)
 
@@ -855,11 +921,21 @@ def actualizar_item(
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
     # ==========================================================
-    # Evento RabbitMQ
+    # Evento RabbitMQ (integración actual)
     # ==========================================================
     _publicar_evento_item(
         "items.actualizado",
         ItemRead.model_validate(item).model_dump(mode="json"),
+    )
+
+    # ==========================================================
+    # Evento Kafka (tarea 54)
+    # ==========================================================
+    _publicar_evento_item_kafka(
+        event_type="item.updated",
+        aggregate_id=item.id,
+        payload=ItemRead.model_validate(item).model_dump(mode="json"),
+        current_user=current_user,
     )
 
     logger.info(
@@ -872,6 +948,7 @@ def actualizar_item(
         data=ItemRead.model_validate(item),
         metadata={},
     )
+
 
 @router.get(
     "/{item_id}/historial",
@@ -995,6 +1072,7 @@ def eliminar_item(
     Mensajería:
     - Publica evento 'items.eliminado' en RabbitMQ sin romper la operación principal
       si el broker no está disponible.
+    - Publica también evento de dominio en Kafka para la tarea 54.
     """
     _bind_audit_user(current_user)
 
@@ -1026,7 +1104,7 @@ def eliminar_item(
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
     # ==========================================================
-    # Evento RabbitMQ
+    # Evento RabbitMQ (integración actual)
     # ==========================================================
     _publicar_evento_item(
         "items.eliminado",
@@ -1037,6 +1115,22 @@ def eliminar_item(
             "codigo_sku": item.codigo_sku,
             "eliminado": True,
         },
+    )
+
+    # ==========================================================
+    # Evento Kafka (tarea 54)
+    # ==========================================================
+    _publicar_evento_item_kafka(
+        event_type="item.deleted",
+        aggregate_id=item.id,
+        payload={
+            "id": item.id,
+            "name": item.name,
+            "sku": item.sku,
+            "codigo_sku": item.codigo_sku,
+            "eliminado": True,
+        },
+        current_user=current_user,
     )
 
     logger.info(
@@ -1071,6 +1165,9 @@ def restaurar_item(
 
     Métricas:
     - Sincroniza gauge de items activos.
+
+    Mensajería:
+    - Publica evento de dominio en Kafka para reflejar la restauración.
     """
     _bind_audit_user(current_user)
 
@@ -1093,6 +1190,16 @@ def restaurar_item(
 
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
+
+    # ==========================================================
+    # Evento Kafka (tarea 54)
+    # ==========================================================
+    _publicar_evento_item_kafka(
+        event_type="item.restored",
+        aggregate_id=item.id,
+        payload=ItemRead.model_validate(item).model_dump(mode="json"),
+        current_user=current_user,
+    )
 
     logger.info(f"Item restaurado: id={item.id}")
 
@@ -1120,6 +1227,9 @@ def transferir_stock(
     Caché:
     - Invalida caché de item origen y destino
     - Invalida páginas relacionadas porque cambió stock
+
+    Mensajería:
+    - Publica evento de dominio en Kafka para registrar la transferencia.
     """
     _bind_audit_user(current_user)
 
@@ -1194,6 +1304,23 @@ def transferir_stock(
     for affected_id in (item_origen.id, item_destino.id):
         delete_cache(build_item_cache_key(affected_id))
         invalidate_list_caches_for_item(affected_id, include_first_pages=True)
+
+    # ==========================================================
+    # Evento Kafka (tarea 54)
+    # ==========================================================
+    _publicar_evento_item_kafka(
+        event_type="item.stock_transferred",
+        aggregate_id=item_origen.id,
+        payload={
+            "item_origen_id": item_origen.id,
+            "item_destino_id": item_destino.id,
+            "cantidad_transferida": payload.cantidad,
+            "stock_origen": item_origen.stock,
+            "stock_destino": item_destino.stock,
+            "usuario": payload.usuario,
+        },
+        current_user=current_user,
+    )
 
     return {
         "success": True,
