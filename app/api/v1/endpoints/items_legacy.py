@@ -166,6 +166,8 @@ def crear_item(
     - Publica evento 'items.creado' en RabbitMQ sin romper la operación principal
       si el broker no está disponible.
     - Publica también evento de dominio en Kafka para la tarea 54.
+    - Encola tarea Celery solo si está habilitada, sin romper el endpoint
+      si Redis/Broker no está disponible.
     """
     _bind_audit_user(current_user)
 
@@ -200,11 +202,26 @@ def crear_item(
     ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
     sync_active_items_gauge(db)
 
+    # ==========================================================
+    # Caché
+    # ==========================================================
     # Invalidación inteligente: no vaciamos toda la caché, solo primeras páginas
     invalidate_first_page_list_caches()
 
-    # Disparo de tarea en background con Celery
-    enviar_notificacion.delay(item.id, "admin@empresa.com")
+    # ==========================================================
+    # Celery / tareas async
+    # ==========================================================
+    # Importante:
+    # - En tests/local puede estar deshabilitado
+    # - Si Redis/Broker falla, NO rompemos la operación principal
+    if settings.CELERY_ENABLED:
+        try:
+            enviar_notificacion.delay(item.id, "admin@empresa.com")
+        except Exception as exc:
+            logger.warning(
+                "No se pudo encolar tarea Celery enviar_notificacion: %s",
+                exc,
+            )
 
     # ==========================================================
     # Evento RabbitMQ (integración actual)
@@ -232,7 +249,6 @@ def crear_item(
         data=ItemRead.model_validate(item),
         metadata={},
     )
-
 
 @router.post(
     "/bulk",

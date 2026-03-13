@@ -21,11 +21,19 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       KAFKA_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: api-jmv
       KAFKA_EVENTS_TOPIC: jmv.domain-events
+      CONSUL_ENABLED: "true"
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_NAME: api-jmv
+      SERVICE_HOST: api-jmv-api
+      SERVICE_PORT: 8000
+      SERVICE_TAGS: api,fastapi,jmv
       CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     depends_on:
       db:
@@ -35,6 +43,8 @@ services:
       kafka:
         condition: service_started
       rabbitmq:
+        condition: service_started
+      consul:
         condition: service_started
     networks:
       - api_jmv_network
@@ -138,6 +148,20 @@ services:
       KAFKA_NUM_PARTITIONS: 3
     volumes:
       - kafka_data:/var/lib/kafka/data
+    networks:
+      - api_jmv_network
+    restart: unless-stopped
+
+  consul:
+    # -----------------------------------------------------
+    # Consul Service Discovery (modo dev)
+    # UI y API HTTP en el puerto 8500
+    # -----------------------------------------------------
+    image: consul:1.15
+    container_name: api-jmv-consul
+    command: agent -dev -client=0.0.0.0
+    ports:
+      - "8500:8500"
     networks:
       - api_jmv_network
     restart: unless-stopped

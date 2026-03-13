@@ -19,10 +19,6 @@ def rate_limit_key_func(request: Request) -> str:
     Reglas:
     - Si existe un JWT válido, usa el user_id / subject del token
     - Si no existe o no es válido, usa la IP del cliente
-
-    Nota:
-    - Evitamos `except Exception: pass` para no dejar silencios peligrosos
-      y para que Bandit no marque try/except/pass.
     """
     auth_header = request.headers.get("Authorization")
 
@@ -39,10 +35,10 @@ def rate_limit_key_func(request: Request) -> str:
                 return f"user:{user_id}"
 
         except Exception:
-            # Fallback explícito a IP si el token no existe, expiró o es inválido
             return f"ip:{get_remote_address(request)}"
 
     return f"ip:{get_remote_address(request)}"
+
 
 def dynamic_rate_limit(key: str) -> str:
     """
@@ -88,11 +84,25 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
+    CELERY_ENABLED: bool = False
+
     # Kafka / Event Sourcing
     KAFKA_ENABLED: bool = True
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
     KAFKA_CLIENT_ID: str = "api-jmv"
     KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
+
+    # Consul / Service Discovery
+    # Default False para que tests/local no fallen si Consul no está levantado.
+    # En Docker Compose se habilita explícitamente con CONSUL_ENABLED=true.
+    CONSUL_ENABLED: bool = False
+    CONSUL_HOST: str = "localhost"
+    CONSUL_PORT: int = 8500
+
+    SERVICE_NAME: str = "api-jmv"
+    SERVICE_HOST: str = "localhost"
+    SERVICE_PORT: int = 8000
+    SERVICE_TAGS: str = "api,fastapi,jmv"
 
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
@@ -100,12 +110,24 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
     @property
     def cors_allow_origins_list(self) -> list[str]:
         return [
             origin.strip()
             for origin in self.CORS_ALLOW_ORIGINS.split(",")
             if origin.strip()
+        ]
+
+    @property
+    def service_tags_list(self) -> list[str]:
+        """
+        Convierte SERVICE_TAGS (csv) a lista limpia.
+        """
+        return [
+            tag.strip()
+            for tag in self.SERVICE_TAGS.split(",")
+            if tag.strip()
         ]
 
     @field_validator("API_KEY")
