@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.sanitizers import sanitize_text
+from app.schemas.base import HateoasResponse
 from app.schemas.categoria import CategoriaResponse
 
 SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
@@ -15,18 +16,6 @@ SKU_RETO_REGEX = re.compile(r"^[A-Z]{2}-\d{4}$")  # ej: AB-1234
 class ItemCreate(BaseModel):
     """
     Schema de entrada para crear un item.
-
-    Incluye validaciones de:
-    - nombre
-    - descripción
-    - precio
-    - codigo_sku
-    - stock
-    - categoria_id opcional
-
-    Sanitización aplicada:
-    - name
-    - description
     """
 
     name: str = Field(..., min_length=1, max_length=200, description="Nombre del item")
@@ -79,12 +68,12 @@ class ItemCreate(BaseModel):
         return v
 
 
-class ItemRead(BaseModel):
+class ItemRead(HateoasResponse):
     """
-    Schema de salida para items.
+    Schema de salida para items con HATEOAS.
     """
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
     name: str

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, time
-from typing import Optional
+from math import ceil
+from typing import Any, Optional
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +29,7 @@ from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.metrics import ITEMS_CREATED_BY_CATEGORY
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
-from app.core.security import verify_api_key, require_role
+from app.core.security import require_role, verify_api_key
 from app.database.database import get_db, get_db_async
 from app.dependencies import get_item_repo
 from app.messaging.kafka_publisher import publish_domain_event
@@ -50,18 +52,12 @@ from app.workers.tasks import enviar_notificacion
 
 router = APIRouter()
 
-# Logger específico del módulo
 logger = logging.getLogger(__name__)
+
+LOW_STOCK_THRESHOLD = 5
 
 
 def _publicar_evento_item(routing_key: str, payload: dict) -> None:
-    """
-    Publica un evento de item en RabbitMQ de forma segura.
-
-    Diseño:
-    - Si RabbitMQ falla, NO rompemos la operación principal del API.
-    - Solo registramos warning para no afectar UX ni tests.
-    """
     import asyncio
 
     rabbitmq_url = getattr(
@@ -90,22 +86,10 @@ def _publicar_evento_item(routing_key: str, payload: dict) -> None:
 
 
 def _bind_audit_user(current_user: Usuario | None) -> None:
-    """
-    Guarda el user_id actual en el contexto de auditoría.
-
-    Esto permite que los eventos de SQLAlchemy registren automáticamente
-    quién hizo el cambio, sin pasar user_id manualmente hasta el modelo.
-    """
     set_current_user_id(current_user.id if current_user else None)
 
 
 def _build_event_metadata(current_user: Usuario | None) -> dict:
-    """
-    Construye metadata estándar para eventos de dominio.
-
-    Se usa para trazabilidad de eventos Kafka sin acoplar demasiado
-    la capa HTTP a la mensajería.
-    """
     return {
         "source": "api-jmv",
         "user_id": current_user.id if current_user else None,
@@ -119,13 +103,6 @@ def _publicar_evento_item_kafka(
     payload: dict,
     current_user: Usuario | None = None,
 ) -> None:
-    """
-    Publica un evento de dominio en Kafka de forma segura.
-
-    Diseño:
-    - Si Kafka falla, NO rompe la operación principal del endpoint.
-    - Usa un esquema estándar DomainEvent.
-    """
     event = DomainEvent(
         event_type=event_type,
         aggregate_type="item",
@@ -137,10 +114,81 @@ def _publicar_evento_item_kafka(
     publish_domain_event(event)
 
 
+def _build_absolute_url(request: Request, route_name: str, **path_params: Any) -> str:
+    return str(request.url_for(route_name, **path_params))
+
+
+def _build_transferir_stock_url(request: Request) -> str:
+    return _build_absolute_url(request, "transferir_stock")
+
+
+def build_links(item: Item, request: Request) -> dict[str, str]:
+    links: dict[str, str] = {
+        "self": _build_absolute_url(request, "obtener_item_por_id", item_id=str(item.id)),
+    }
+
+    if item.eliminado:
+        links["restaurar"] = _build_absolute_url(request, "restaurar_item", item_id=str(item.id))
+        return links
+
+    links["actualizar"] = _build_absolute_url(request, "actualizar_item", item_id=str(item.id))
+    links["eliminar"] = _build_absolute_url(request, "eliminar_item", item_id=str(item.id))
+    links["historial"] = _build_absolute_url(request, "obtener_historial_item", item_id=str(item.id))
+
+    if item.stock <= LOW_STOCK_THRESHOLD:
+        links["reabastecer"] = _build_transferir_stock_url(request)
+
+    return links
+
+
+def _item_read_with_links(item: Item, request: Request) -> ItemRead:
+    payload = ItemRead.model_validate(item)
+    payload.links = build_links(item, request)
+    return payload
+
+
+def _items_read_with_links(items: list[Item], request: Request) -> list[ItemRead]:
+    return [_item_read_with_links(item, request) for item in items]
+
+
+def _build_page_url(request: Request, query_params: dict[str, Any], page: int) -> str:
+    params = {
+        key: value
+        for key, value in query_params.items()
+        if value is not None
+    }
+    params["page"] = page
+    return f"{request.url.path}?{urlencode(params, doseq=True)}"
+
+
+def build_pagination_links(
+    *,
+    request: Request,
+    page: int,
+    page_size: int,
+    total: int,
+    query_params: dict[str, Any],
+) -> dict[str, str | None]:
+    last_page = max(1, ceil(total / page_size)) if page_size > 0 else 1
+
+    first_link = None if page <= 1 else _build_page_url(request, query_params, 1)
+    prev_link = None if page <= 1 else _build_page_url(request, query_params, page - 1)
+    next_link = None if page >= last_page else _build_page_url(request, query_params, page + 1)
+    last_link = None if page >= last_page else _build_page_url(request, query_params, last_page)
+
+    return {
+        "first": first_link,
+        "prev": prev_link,
+        "next": next_link,
+        "last": last_link,
+    }
+
+
 @router.post(
     "/",
     response_model=ApiResponse[ItemRead],
     summary="Crear item",
+    description="Crea un item y devuelve representación HATEOAS con links absolutos en _links.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 @limiter.limit(dynamic_rate_limit)
@@ -151,24 +199,6 @@ def crear_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Crea un item individual.
-
-    Caché:
-    - Al crear un item nuevo, invalidamos primeras páginas del listado,
-      porque son las que más probablemente cambien.
-
-    Métricas:
-    - Incrementa contador por categoría.
-    - Sincroniza gauge de items activos.
-
-    Mensajería:
-    - Publica evento 'items.creado' en RabbitMQ sin romper la operación principal
-      si el broker no está disponible.
-    - Publica también evento de dominio en Kafka para la tarea 54.
-    - Encola tarea Celery solo si está habilitada, sin romper el endpoint
-      si Redis/Broker no está disponible.
-    """
     _bind_audit_user(current_user)
 
     categoria = None
@@ -195,25 +225,12 @@ def crear_item(
 
     item = repo.create(item)
 
-    # ==========================================================
-    # Métricas Prometheus
-    # ==========================================================
     category_name = categoria.nombre if categoria else "sin_categoria"
     ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
     sync_active_items_gauge(db)
 
-    # ==========================================================
-    # Caché
-    # ==========================================================
-    # Invalidación inteligente: no vaciamos toda la caché, solo primeras páginas
     invalidate_first_page_list_caches()
 
-    # ==========================================================
-    # Celery / tareas async
-    # ==========================================================
-    # Importante:
-    # - En tests/local puede estar deshabilitado
-    # - Si Redis/Broker falla, NO rompemos la operación principal
     if settings.CELERY_ENABLED:
         try:
             enviar_notificacion.delay(item.id, "admin@empresa.com")
@@ -223,17 +240,11 @@ def crear_item(
                 exc,
             )
 
-    # ==========================================================
-    # Evento RabbitMQ (integración actual)
-    # ==========================================================
     _publicar_evento_item(
         "items.creado",
         ItemRead.model_validate(item).model_dump(mode="json"),
     )
 
-    # ==========================================================
-    # Evento Kafka (tarea 54)
-    # ==========================================================
     _publicar_evento_item_kafka(
         event_type="item.created",
         aggregate_id=item.id,
@@ -246,35 +257,24 @@ def crear_item(
     return ApiResponse[ItemRead](
         success=True,
         message="Item creado exitosamente",
-        data=ItemRead.model_validate(item),
+        data=_item_read_with_links(item, request),
         metadata={},
     )
+
 
 @router.post(
     "/bulk",
     response_model=ApiResponse[list[ItemRead]],
     summary="Crear items en lote (máx 100) (transaccional)",
+    description="Crea items en lote y devuelve cada recurso con links HATEOAS absolutos.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def bulk_create_items(
+    request: Request,
     payload: BulkCreate,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Crea múltiples items en una sola transacción.
-
-    Caché:
-    - Al insertar muchos items, invalidamos primeras páginas de listados.
-
-    Métricas:
-    - Incrementa contador de items creados.
-    - Sincroniza gauge de items activos al finalizar.
-
-    Nota:
-    - En esta primera fase de Kafka no publicamos eventos por bulk
-      para mantener la integración simple y estable.
-    """
     _bind_audit_user(current_user)
 
     try:
@@ -319,9 +319,6 @@ def bulk_create_items(
         for obj in objects:
             db.refresh(obj)
 
-        # ==========================================================
-        # Métricas Prometheus
-        # ==========================================================
         for it in payload.items:
             categoria_id = getattr(it, "categoria_id", None)
             if categoria_id is not None and categoria_id in categorias_map:
@@ -332,7 +329,6 @@ def bulk_create_items(
             ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
 
         sync_active_items_gauge(db)
-
         invalidate_first_page_list_caches()
 
         logger.info(f"Bulk create completado: total_items={len(objects)}")
@@ -340,7 +336,7 @@ def bulk_create_items(
         return ApiResponse[list[ItemRead]](
             success=True,
             message="Items creados exitosamente (bulk)",
-            data=[ItemRead.model_validate(o) for o in objects],
+            data=_items_read_with_links(objects, request),
             metadata={},
         )
 
@@ -379,18 +375,6 @@ def bulk_delete_items(
     payload: BulkDelete,
     db: Session = Depends(get_db),
 ):
-    """
-    Elimina en lote usando soft delete.
-
-    Caché:
-    - Invalida caché individual y páginas relacionadas de cada item afectado.
-
-    Métricas:
-    - Sincroniza gauge de items activos tras el commit.
-
-    Nota:
-    - En esta primera fase de Kafka no publicamos eventos por bulk.
-    """
     try:
         now = datetime.now()
 
@@ -417,12 +401,8 @@ def bulk_delete_items(
 
         db.commit()
 
-        # ==========================================================
-        # Métricas Prometheus
-        # ==========================================================
         sync_active_items_gauge(db)
 
-        # Invalidación de caché después del commit
         for item_id in affected_ids:
             delete_cache(build_item_cache_key(item_id))
             invalidate_list_caches_for_item(item_id, include_first_pages=True)
@@ -466,15 +446,6 @@ def bulk_update_disponible(
     payload: BulkUpdateDisponible,
     db: Session = Depends(get_db),
 ):
-    """
-    Actualiza 'disponible' en lote.
-
-    Caché:
-    - Si cambia stock, invalidamos caché individual y páginas relacionadas.
-
-    Nota:
-    - En esta primera fase de Kafka no publicamos eventos por bulk.
-    """
     try:
         stmt = select(Item).where(Item.id.in_(payload.ids))
         found = db.execute(stmt).scalars().all()
@@ -513,7 +484,6 @@ def bulk_update_disponible(
 
         db.commit()
 
-        # Invalidación de caché después del commit
         for item_id in set(affected_ids):
             delete_cache(build_item_cache_key(item_id))
             invalidate_list_caches_for_item(item_id, include_first_pages=True)
@@ -555,6 +525,7 @@ def bulk_update_disponible(
     "/",
     response_model=ApiResponse[PaginatedResponse[ItemRead]],
     summary="Listar items con filtros, búsqueda, orden y paginación (solo activos)",
+    description="Devuelve items con _links HATEOAS y metadata._links con navegación first/prev/next/last usando URLs completas.",
     dependencies=[Depends(verify_api_key)],
 )
 @limiter.limit(dynamic_rate_limit)
@@ -580,15 +551,18 @@ async def listar_items(
     db: AsyncSession = Depends(get_db_async),
     _ip: str = Depends(log_client_ip),
 ):
-    """
-    Lista items activos con filtros, orden y paginación usando AsyncSession.
-
-    Caché:
-    - Usa cache key basada en filtros + page.
-    - Si existe en Redis => X-Cache: HIT
-    - Si no existe => consulta BD async, guarda en Redis => X-Cache: MISS
-    """
     cache_params = {
+        "page_size": page_size,
+        "nombre": nombre,
+        "precio_min": precio_min,
+        "precio_max": precio_max,
+        "disponible": disponible,
+        "categoria_id": categoria_id,
+        "ordenar_por": ordenar_por,
+        "creado_desde": creado_desde.isoformat() if creado_desde else None,
+    }
+
+    query_params = {
         "page_size": page_size,
         "nombre": nombre,
         "precio_min": precio_min,
@@ -666,17 +640,31 @@ async def listar_items(
         page=page,
         page_size=page_size,
         total=total,
-        items=[ItemRead.model_validate(i) for i in items],
+        items=_items_read_with_links(list(items), request),
+    )
+
+    pagination_links = build_pagination_links(
+        request=request,
+        page=page,
+        page_size=page_size,
+        total=total,
+        query_params=query_params,
     )
 
     payload = ApiResponse[PaginatedResponse[ItemRead]](
         success=True,
         message="Items obtenidos exitosamente",
         data=paginated,
-        metadata={},
+        metadata={
+            "_links": pagination_links,
+            "hateoas": {
+                "absolute_urls": True,
+                "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+            },
+        },
     )
 
-    payload_dict = payload.model_dump(mode="json")
+    payload_dict = payload.model_dump(mode="json", by_alias=True)
 
     set_cache(
         cache_key,
@@ -700,15 +688,14 @@ async def listar_items(
     "/buscar",
     response_model=ApiResponse[list[ItemRead]],
     summary="Buscar items por nombre exacto de forma segura",
+    description="Devuelve items encontrados con _links HATEOAS absolutos.",
     dependencies=[Depends(verify_api_key)],
 )
 def buscar_items(
+    request: Request,
     nombre: str = Query(..., min_length=1, description="Nombre exacto del item"),
     db: Session = Depends(get_db),
 ):
-    """
-    Búsqueda segura por nombre exacto usando ORM.
-    """
     items = (
         db.query(Item)
         .filter(Item.name == nombre, Item.eliminado.is_(False))
@@ -719,7 +706,7 @@ def buscar_items(
     return ApiResponse[list[ItemRead]](
         success=True,
         message="Búsqueda segura ejecutada",
-        data=[ItemRead.model_validate(item) for item in items],
+        data=_items_read_with_links(items, request),
         metadata={},
     )
 
@@ -731,13 +718,11 @@ def buscar_items(
     dependencies=[Depends(verify_api_key)],
 )
 def listar_items_cursor(
+    request: Request,
     cursor: int = Query(0, ge=0, description="Último ID visto; 0 para iniciar"),
     limite: int = Query(10, ge=1, le=100, description="Cantidad máxima de items por página"),
     db: Session = Depends(get_db),
 ):
-    """
-    Lista items activos usando paginación por cursor.
-    """
     stmt = (
         select(Item)
         .where(Item.eliminado == False)  # noqa: E712
@@ -753,7 +738,7 @@ def listar_items_cursor(
     next_cursor = items[-1].id if items else None
 
     data = CursorPaginationResponse(
-        items=[ItemRead.model_validate(item) for item in items],
+        items=[item.model_dump(by_alias=True) for item in _items_read_with_links(items, request)],
         next_cursor=next_cursor,
         has_more=has_more,
     )
@@ -770,16 +755,15 @@ def listar_items_cursor(
     "/eliminados",
     response_model=ApiResponse[PaginatedResponse[ItemRead]],
     summary="Listar items eliminados (soft delete)",
+    description="Devuelve items eliminados con _links HATEOAS; si el item está eliminado solo expone self y restaurar.",
     dependencies=[Depends(verify_api_key)],
 )
 def listar_eliminados(
+    request: Request,
     page: int = Query(1, ge=1, description="Página (>=1)"),
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
     db: Session = Depends(get_db),
 ):
-    """
-    Lista items eliminados lógicamente.
-    """
     stmt = select(Item).where(Item.eliminado == True)  # noqa: E712
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -792,18 +776,33 @@ def listar_eliminados(
 
     items = db.execute(stmt).scalars().all()
 
+    query_params = {"page_size": page_size}
+    pagination_links = build_pagination_links(
+        request=request,
+        page=page,
+        page_size=page_size,
+        total=total,
+        query_params=query_params,
+    )
+
     paginated = PaginatedResponse[ItemRead](
         page=page,
         page_size=page_size,
         total=total,
-        items=[ItemRead.model_validate(i) for i in items],
+        items=_items_read_with_links(items, request),
     )
 
     return ApiResponse[PaginatedResponse[ItemRead]](
         success=True,
         message="Items eliminados obtenidos exitosamente",
         data=paginated,
-        metadata={},
+        metadata={
+            "_links": pagination_links,
+            "hateoas": {
+                "absolute_urls": True,
+                "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+            },
+        },
     )
 
 
@@ -814,9 +813,6 @@ def listar_eliminados(
     dependencies=[Depends(verify_api_key)],
 )
 def mi_ip(ip: str = Depends(get_client_ip)):
-    """
-    Endpoint demo para probar dependency injection de IP.
-    """
     return ApiResponse[dict](
         success=True,
         message="IP obtenida exitosamente",
@@ -829,21 +825,15 @@ def mi_ip(ip: str = Depends(get_client_ip)):
     "/{item_id}",
     response_model=ApiResponse[ItemRead],
     summary="Obtener item por ID",
+    description="Devuelve el recurso con links HATEOAS absolutos en _links.",
     dependencies=[Depends(verify_api_key)],
 )
 def obtener_item_por_id(
+    request: Request,
     item_id: int,
     response: Response,
     repo: ItemRepository = Depends(get_item_repo),
 ):
-    """
-    Obtiene un item por ID usando patrón cache-aside.
-
-    Flujo:
-    1. Busca en Redis.
-    2. Si existe: X-Cache=HIT
-    3. Si no existe: consulta BD, guarda en Redis, X-Cache=MISS
-    """
     cache_key = build_item_cache_key(item_id)
 
     cached_item = get_cache(cache_key)
@@ -860,13 +850,13 @@ def obtener_item_por_id(
     payload = ApiResponse[ItemRead](
         success=True,
         message="Item obtenido exitosamente",
-        data=ItemRead.model_validate(item),
+        data=_item_read_with_links(item, request),
         metadata={},
     )
 
     set_cache(
         cache_key,
-        payload.model_dump(mode="json"),
+        payload.model_dump(mode="json", by_alias=True),
         ttl=settings.CACHE_TTL_ITEM_SECONDS,
     )
 
@@ -878,27 +868,17 @@ def obtener_item_por_id(
     "/{item_id}",
     response_model=ApiResponse[ItemRead],
     summary="Actualizar item por ID",
+    description="Actualiza el recurso y devuelve la representación HATEOAS actualizada.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def actualizar_item(
+    request: Request,
     item_id: int,
     payload: ItemCreate,
     repo: ItemRepository = Depends(get_item_repo),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Actualiza un item existente.
-
-    - Requiere rol admin o editor
-    - Mantiene auditoría vía contexto de usuario
-    - Invalida caché individual y de listados relacionados
-
-    Mensajería:
-    - Publica evento 'items.actualizado' en RabbitMQ sin romper la operación principal
-      si el broker no está disponible.
-    - Publica también evento de dominio en Kafka para la tarea 54.
-    """
     _bind_audit_user(current_user)
 
     item = repo.get_by_id(item_id)
@@ -936,17 +916,11 @@ def actualizar_item(
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    # ==========================================================
-    # Evento RabbitMQ (integración actual)
-    # ==========================================================
     _publicar_evento_item(
         "items.actualizado",
         ItemRead.model_validate(item).model_dump(mode="json"),
     )
 
-    # ==========================================================
-    # Evento Kafka (tarea 54)
-    # ==========================================================
     _publicar_evento_item_kafka(
         event_type="item.updated",
         aggregate_id=item.id,
@@ -961,7 +935,7 @@ def actualizar_item(
     return ApiResponse[ItemRead](
         success=True,
         message="Item actualizado exitosamente",
-        data=ItemRead.model_validate(item),
+        data=_item_read_with_links(item, request),
         metadata={},
     )
 
@@ -976,10 +950,6 @@ def obtener_historial_item(
     item_id: int,
     db: Session = Depends(get_db),
 ):
-    """
-    Obtiene todos los registros de auditoría de un item específico,
-    ordenados cronológicamente.
-    """
     auditorias = (
         db.execute(
             select(AuditoriaItem)
@@ -1023,10 +993,6 @@ def obtener_estado_item_en_fecha(
     fecha: datetime = Query(..., description="Fecha y hora en formato ISO 8601"),
     db: Session = Depends(get_db),
 ):
-    """
-    Reconstruye el estado de un item en una fecha específica
-    usando los registros de auditoría hasta ese momento.
-    """
     auditorias = (
         db.execute(
             select(AuditoriaItem)
@@ -1075,21 +1041,6 @@ def eliminar_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin")),
 ):
-    """
-    Soft delete de un item individual.
-
-    Caché:
-    - Borra caché individual del item
-    - Invalida páginas de listados relacionadas
-
-    Métricas:
-    - Sincroniza gauge de items activos.
-
-    Mensajería:
-    - Publica evento 'items.eliminado' en RabbitMQ sin romper la operación principal
-      si el broker no está disponible.
-    - Publica también evento de dominio en Kafka para la tarea 54.
-    """
     _bind_audit_user(current_user)
 
     item = repo.get_by_id(item_id)
@@ -1110,18 +1061,11 @@ def eliminar_item(
 
     repo.delete(item)
 
-    # ==========================================================
-    # Métricas Prometheus
-    # ==========================================================
     sync_active_items_gauge(repo.db)
 
-    # Invalidación de caché después del delete
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    # ==========================================================
-    # Evento RabbitMQ (integración actual)
-    # ==========================================================
     _publicar_evento_item(
         "items.eliminado",
         {
@@ -1133,9 +1077,6 @@ def eliminar_item(
         },
     )
 
-    # ==========================================================
-    # Evento Kafka (tarea 54)
-    # ==========================================================
     _publicar_evento_item_kafka(
         event_type="item.deleted",
         aggregate_id=item.id,
@@ -1165,26 +1106,15 @@ def eliminar_item(
     "/{item_id}/restaurar",
     response_model=ApiResponse[ItemRead],
     summary="Restaurar item eliminado (soft delete)",
+    description="Restaura el recurso y devuelve la representación HATEOAS actualizada.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 def restaurar_item(
+    request: Request,
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Restaura un item previamente eliminado.
-
-    Caché:
-    - Borra caché individual del item
-    - Invalida páginas relacionadas para que reaparezca donde corresponda
-
-    Métricas:
-    - Sincroniza gauge de items activos.
-
-    Mensajería:
-    - Publica evento de dominio en Kafka para reflejar la restauración.
-    """
     _bind_audit_user(current_user)
 
     item = repo.get_by_id(item_id)
@@ -1199,17 +1129,11 @@ def restaurar_item(
     item.eliminado_en = None
     item = repo.update(item)
 
-    # ==========================================================
-    # Métricas Prometheus
-    # ==========================================================
     sync_active_items_gauge(repo.db)
 
     delete_cache(build_item_cache_key(item_id))
     invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    # ==========================================================
-    # Evento Kafka (tarea 54)
-    # ==========================================================
     _publicar_evento_item_kafka(
         event_type="item.restored",
         aggregate_id=item.id,
@@ -1222,7 +1146,7 @@ def restaurar_item(
     return ApiResponse[ItemRead](
         success=True,
         message="Item restaurado exitosamente",
-        data=ItemRead.model_validate(item),
+        data=_item_read_with_links(item, request),
         metadata={},
     )
 
@@ -1237,16 +1161,6 @@ def transferir_stock(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Transfiere stock entre dos items de forma atómica.
-
-    Caché:
-    - Invalida caché de item origen y destino
-    - Invalida páginas relacionadas porque cambió stock
-
-    Mensajería:
-    - Publica evento de dominio en Kafka para registrar la transferencia.
-    """
     _bind_audit_user(current_user)
 
     if payload.item_origen_id == payload.item_destino_id:
@@ -1316,14 +1230,10 @@ def transferir_stock(
     db.refresh(item_origen)
     db.refresh(item_destino)
 
-    # Invalidación de caché de ambos items
     for affected_id in (item_origen.id, item_destino.id):
         delete_cache(build_item_cache_key(affected_id))
         invalidate_list_caches_for_item(affected_id, include_first_pages=True)
 
-    # ==========================================================
-    # Evento Kafka (tarea 54)
-    # ==========================================================
     _publicar_evento_item_kafka(
         event_type="item.stock_transferred",
         aggregate_id=item_origen.id,
