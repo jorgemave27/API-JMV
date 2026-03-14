@@ -33,6 +33,7 @@ from app.models.categoria import Categoria
 from app.models.configuracion_cors import ConfiguracionCors
 from app.models.item import Item
 from app.routers.categorias import router as categorias_router
+from app.oauth.router import router as oauth_router
 from app.services.metrics_service import sync_active_items_gauge
 
 
@@ -256,6 +257,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router_v1, prefix="/api/v1")
     app.include_router(api_router_v2, prefix="/api/v2")
     app.include_router(operaciones_router, prefix="/api/v1")
+    app.include_router(oauth_router)
 
     Instrumentator().instrument(app).expose(
         app,
