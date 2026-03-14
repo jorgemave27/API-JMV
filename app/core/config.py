@@ -8,8 +8,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from app.core.vault import vault_client
+
 
 APP_ENV = os.getenv("APP_ENV", "development")
+
+
+# -----------------------------------------------------
+# Cargar secretos desde Vault ANTES de construir settings
+# -----------------------------------------------------
+try:
+    if vault_client.enabled():
+        secrets_data = vault_client.read_secret("secret/mi-api")
+
+        if "API_KEY" in secrets_data:
+            os.environ["API_KEY"] = secrets_data["API_KEY"]
+
+        if "DB_PASSWORD" in secrets_data:
+            os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
+
+except Exception:
+    # Si Vault falla no bloquea el arranque
+    pass
 
 
 def rate_limit_key_func(request: Request) -> str:
@@ -43,10 +63,6 @@ def rate_limit_key_func(request: Request) -> str:
 def dynamic_rate_limit(key: str) -> str:
     """
     Define el límite dinámico según la clave calculada por key_func.
-
-    Reglas:
-    - user:<id> => 1000/minute
-    - ip:<ip>   => 50/minute
     """
     if key.startswith("user:"):
         return "1000/minute"
@@ -83,7 +99,6 @@ class Settings(BaseSettings):
 
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
-
     CELERY_ENABLED: bool = False
 
     # Kafka / Event Sourcing
@@ -124,9 +139,6 @@ class Settings(BaseSettings):
 
     @property
     def service_tags_list(self) -> list[str]:
-        """
-        Convierte SERVICE_TAGS (csv) a lista limpia.
-        """
         return [
             tag.strip()
             for tag in self.SERVICE_TAGS.split(",")
@@ -145,42 +157,6 @@ class Settings(BaseSettings):
     def validate_jwt_secret_key_length(cls, value: str) -> str:
         if len(value) < 16:
             raise ValueError("JWT_SECRET_KEY debe tener al menos 16 caracteres")
-        return value
-
-    @field_validator("LOG_LEVEL")
-    @classmethod
-    def validate_log_level(cls, value: str) -> str:
-        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-        value = value.upper()
-
-        if value not in allowed:
-            raise ValueError(f"LOG_LEVEL debe ser uno de: {allowed}")
-
-        return value
-
-    @field_validator("JWT_ALGORITHM")
-    @classmethod
-    def validate_jwt_algorithm(cls, value: str) -> str:
-        allowed = {"HS256"}
-        value = value.upper()
-
-        if value not in allowed:
-            raise ValueError(f"JWT_ALGORITHM debe ser uno de: {allowed}")
-
-        return value
-
-    @field_validator("ACCESS_TOKEN_EXPIRE_MINUTES")
-    @classmethod
-    def validate_access_token_expire_minutes(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES debe ser mayor que 0")
-        return value
-
-    @field_validator("REFRESH_TOKEN_EXPIRE_DAYS")
-    @classmethod
-    def validate_refresh_token_expire_days(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("REFRESH_TOKEN_EXPIRE_DAYS debe ser mayor que 0")
         return value
 
 

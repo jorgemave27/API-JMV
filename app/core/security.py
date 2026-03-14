@@ -11,6 +11,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
+from app.core.api_key_manager import api_key_manager
 from app.core.config import settings
 from app.database.database import get_db
 from app.models.usuario import Usuario
@@ -36,13 +37,12 @@ def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key
     """
     Dependency de seguridad que valida la API Key enviada en el header.
 
-    Header esperado:
-        X-API-Key: <api_key>
-
-    Si la API Key no existe o no coincide con la configurada
-    en variables de entorno, se lanza HTTP 401.
+    Regla:
+    - acepta la key activa
+    - acepta temporalmente la key anterior durante la ventana
+      de convivencia posterior a una rotación
     """
-    if not x_api_key or x_api_key != settings.API_KEY:
+    if not api_key_manager.is_valid_api_key(x_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="API Key inválida",
