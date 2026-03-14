@@ -93,8 +93,6 @@ class Settings(BaseSettings):
     KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
 
     # Consul / Service Discovery
-    # Default False para que tests/local no fallen si Consul no está levantado.
-    # En Docker Compose se habilita explícitamente con CONSUL_ENABLED=true.
     CONSUL_ENABLED: bool = False
     CONSUL_HOST: str = "localhost"
     CONSUL_PORT: int = 8500
@@ -103,6 +101,11 @@ class Settings(BaseSettings):
     SERVICE_HOST: str = "localhost"
     SERVICE_PORT: int = 8000
     SERVICE_TAGS: str = "api,fastapi,jmv"
+
+    # Resilience / Circuit Breaker
+    EXTERNAL_HTTP_TIMEOUT_SECONDS: float = 3.0
+    EXTERNAL_CACHE_TTL_SECONDS: int = 300
+    RESILIENCE_MOCK_BASE_URL: str = "http://127.0.0.1:8000/api/v1/admin/resilience/mock-external"
 
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",

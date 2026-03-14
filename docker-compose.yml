@@ -35,6 +35,9 @@ services:
       SERVICE_PORT: 8000
       SERVICE_TAGS: api,fastapi,jmv
       CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      EXTERNAL_HTTP_TIMEOUT_SECONDS: 3
+      EXTERNAL_CACHE_TTL_SECONDS: 300
+      RESILIENCE_MOCK_BASE_URL: http://api:8000/api/v1/admin/resilience/mock-external
     depends_on:
       db:
         condition: service_healthy
@@ -70,6 +73,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: api-jmv-projection-consumer
       KAFKA_EVENTS_TOPIC: jmv.domain-events
+      EXTERNAL_HTTP_TIMEOUT_SECONDS: 3
+      EXTERNAL_CACHE_TTL_SECONDS: 300
+      RESILIENCE_MOCK_BASE_URL: http://api:8000/api/v1/admin/resilience/mock-external
     depends_on:
       db:
         condition: service_healthy

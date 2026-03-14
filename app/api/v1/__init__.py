@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 # Routers de endpoints
 from app.api.v1.endpoints.admin_cache import router as admin_cache_router
+from app.api.v1.endpoints.admin_circuit_breakers import router as admin_circuit_breakers_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.configuracion_cors import router as configuracion_cors_router
 from app.api.v1.endpoints.health import router as health_router
@@ -62,6 +63,15 @@ api_router_v1.include_router(
     admin_cache_router,
     prefix="/admin/cache",
     tags=["Admin Cache"],
+)
+
+# ==============================
+# Circuit Breakers / Resilience
+# ==============================
+api_router_v1.include_router(
+    admin_circuit_breakers_router,
+    prefix="/admin",
+    tags=["Admin Resilience"],
 )
 
 # ==============================

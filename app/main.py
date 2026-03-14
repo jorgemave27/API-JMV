@@ -89,6 +89,13 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "Admin Resilience",
+        "description": (
+            "Diagnóstico y pruebas de circuit breakers, resiliencia "
+            "y fallback cacheado para servicios externos."
+        ),
+    },
+    {
         "name": "Reportes",
         "description": (
             "Endpoints de reportes operativos y procesos asociados "
@@ -99,19 +106,6 @@ OPENAPI_TAGS = [
 
 
 def create_app() -> FastAPI:
-    """
-    Factory principal de la aplicación FastAPI.
-
-    Responsabilidades:
-    - Inicializar logging
-    - Crear la app
-    - Registrar middlewares
-    - Crear tablas en desarrollo
-    - Registrar exception handlers
-    - Incluir routers versionados y utilitarios
-    - Exponer documentación enriquecida
-    - Registrar/desregistrar servicio en Consul
-    """
     setup_logging()
 
     app = FastAPI(
@@ -137,18 +131,11 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
-    # Estado para Consul
     app.state.consul_service_id = None
 
-    # -------------------------------------------------------------
-    # Rate limiting
-    # -------------------------------------------------------------
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # -------------------------------------------------------------
-    # Middlewares globales
-    # -------------------------------------------------------------
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(AuditContextMiddleware)
     app.add_middleware(ThreatDetectionMiddleware)
@@ -159,28 +146,16 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(SQLInjectionWarningMiddleware)
 
-    # -------------------------------------------------------------
-    # Base de datos
-    # -------------------------------------------------------------
     Base.metadata.create_all(bind=engine)
 
-    # -------------------------------------------------------------
-    # Inicialización de métricas de negocio
-    # -------------------------------------------------------------
     db = SessionLocal()
     try:
         sync_active_items_gauge(db)
     finally:
         db.close()
 
-    # -------------------------------------------------------------
-    # Eventos de ciclo de vida
-    # -------------------------------------------------------------
     @app.on_event("startup")
     async def on_startup_register_consul() -> None:
-        """
-        Registra la API en Consul al iniciar.
-        """
         if not settings.CONSUL_ENABLED:
             return
 
@@ -193,9 +168,6 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def on_shutdown_deregister_consul() -> None:
-        """
-        Desregistra la API de Consul al apagar.
-        """
         if not settings.CONSUL_ENABLED:
             return
 
@@ -203,9 +175,6 @@ def create_app() -> FastAPI:
         if service_id:
             deregister_service(service_id)
 
-    # -------------------------------------------------------------
-    # Exception handlers
-    # -------------------------------------------------------------
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         errores = []
@@ -274,9 +243,6 @@ def create_app() -> FastAPI:
             },
         )
 
-    # -------------------------------------------------------------
-    # Router adicional para Scalar
-    # -------------------------------------------------------------
     @app.get("/scalar", include_in_schema=False)
     async def scalar_docs() -> HTMLResponse:
         return get_scalar_api_reference(
@@ -284,9 +250,6 @@ def create_app() -> FastAPI:
             title=f"{settings.APP_NAME} - Scalar",
         )
 
-    # -------------------------------------------------------------
-    # Routers
-    # -------------------------------------------------------------
     app.include_router(health_router)
     app.include_router(categorias_router)
     app.include_router(version_router, prefix="/api")
@@ -294,9 +257,6 @@ def create_app() -> FastAPI:
     app.include_router(api_router_v2, prefix="/api/v2")
     app.include_router(operaciones_router, prefix="/api/v1")
 
-    # -------------------------------------------------------------
-    # Prometheus metrics
-    # -------------------------------------------------------------
     Instrumentator().instrument(app).expose(
         app,
         endpoint="/metrics",
