@@ -1,0 +1,725 @@
+======================================
+INSPECCION REAL DE AUTH EN API CONTAINER
+======================================
+
+1) Contenedor objetivo
+api-jmv-api        api-jmv-api             0.0.0.0:8000->8000/tcp
+
+2) OpenAPI routes auth actuales
+
+3) Ver auth.py dentro del contenedor
+--- PWD ---
+/app
+--- /app ---
+total 40
+drwxr-xr-x 1 appuser appuser 4096 Mar 15 17:16 .
+drwxr-xr-x 1 root    root    4096 Mar 15 17:16 ..
+drwxr-xr-x 1 appuser appuser 4096 Mar 15 16:42 alembic
+-rw-r--r-- 1 appuser appuser 5008 Mar  6 17:32 alembic.ini
+drwxr-xr-x 1 appuser appuser 4096 Mar 15 16:42 app
+-rw-r--r-- 1 appuser appuser 2048 Mar 15 02:33 requirements.txt
+--- auth.py encontrado? ---
+/app/app/api/v1/endpoints/auth.py
+--- contenido auth.py ---
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
+
+from app.core.security import (
+    ACCOUNT_BLOCK_MINUTES,
+    RESET_TOKEN_EXPIRE_HOURS,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    generate_password_reset_token,
+    get_current_user,
+    hash_password,
+    hash_reset_token,
+    is_user_blocked,
+    register_failed_login,
+    reset_failed_login_attempts,
+    verify_password,
+)
+
+from app.security.token_blacklist import (
+    blacklist_token,
+    get_user_sessions,
+    close_session,
+    revoke_all_user_tokens,
+)
+
+from app.database.database import get_db
+from app.models.usuario import Usuario
+from app.schemas.auth import (
+    CambiarPasswordRequest,
+    ForgotPasswordRequest,
+    LoginRequest,
+    RefreshTokenRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+)
+
+router = APIRouter()
+
+bearer_scheme = HTTPBearer()
+
+
+# ---------------------------------------------------------
+# LOGIN
+# ---------------------------------------------------------
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Login de usuario con JWT",
+)
+def login(
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    user = db.query(Usuario).filter(Usuario.email == payload.email).first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+
+    if not user.activo:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario inactivo",
+        )
+
+    if is_user_blocked(user):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Cuenta bloqueada temporalmente",
+        )
+
+    if not verify_password(payload.password, user.hashed_password):
+        register_failed_login(db, user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+
+    reset_failed_login_attempts(db, user)
+
+    return TokenResponse(
+        access_token=create_access_token(user.email),
+        refresh_token=create_refresh_token(user.email),
+        token_type="bearer",  # nosec
+    )
+
+
+# ---------------------------------------------------------
+# REFRESH TOKEN
+# ---------------------------------------------------------
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Renovar access token con refresh token",
+)
+def refresh_token(
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    token_payload = decode_token(payload.refresh_token)
+
+    token_type = token_payload.get("type")
+    subject = token_payload.get("sub")
+
+    if token_type != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere refresh token",
+        )
+
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido",
+        )
+
+    user = db.query(Usuario).filter(Usuario.email == subject).first()
+
+    if user is None or not user.activo:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no válido",
+        )
+
+    return TokenResponse(
+        access_token=create_access_token(user.email),
+        refresh_token=payload.refresh_token,
+        token_type="bearer",  # nosec
+    )
+
+
+# ---------------------------------------------------------
+# LOGOUT (TOKEN BLACKLIST)
+# ---------------------------------------------------------
+@router.post("/logout", summary="Cerrar sesión")
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    """
+    Revoca el token actual usando blacklist.
+    """
+
+    token = credentials.credentials
+    payload = decode_token(token)
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+
+    if not jti or not exp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido",
+        )
+
+    expires_in = int(exp - datetime.utcnow().timestamp())
+
+    blacklist_token(jti, max(expires_in, 0))
+
+    return {
+        "success": True,
+        "message": "Sesión cerrada correctamente",
+        "data": None,
+        "metadata": {},
+    }
+
+
+# ---------------------------------------------------------
+# LISTAR SESIONES ACTIVAS
+# ---------------------------------------------------------
+@router.get("/sesiones", summary="Listar sesiones activas")
+def listar_sesiones(
+    current_user: Usuario = Depends(get_current_user),
+):
+    sesiones = get_user_sessions(current_user.id)
+
+    return {
+        "success": True,
+        "message": "Sesiones activas",
+        "data": sesiones,
+        "metadata": {
+            "total": len(sesiones)
+        },
+    }
+
+
+# ---------------------------------------------------------
+# CERRAR SESION REMOTA
+# ---------------------------------------------------------
+@router.post(
+    "/cerrar-sesion/{jti}",
+    summary="Cerrar una sesión específica",
+)
+def cerrar_sesion_remota(
+    jti: str,
+    current_user: Usuario = Depends(get_current_user),
+):
+    close_session(jti)
+
+    return {
+        "success": True,
+        "message": "Sesión cerrada",
+        "data": None,
+        "metadata": {},
+    }
+
+
+# ---------------------------------------------------------
+# CAMBIAR PASSWORD
+# ---------------------------------------------------------
+@router.post(
+    "/cambiar-password",
+    summary="Cambiar contraseña autenticado",
+)
+def cambiar_password(
+    payload: CambiarPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual es incorrecta",
+        )
+
+    current_user.hashed_password = hash_password(payload.new_password)
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+
+    # -------------------------------------------------
+    # revocar todos los tokens del usuario
+    # -------------------------------------------------
+    revoke_all_user_tokens(current_user.id)
+
+    return {
+        "success": True,
+        "message": "Contraseña actualizada exitosamente",
+        "data": None,
+        "metadata": {},
+    }
+
+
+# ---------------------------------------------------------
+# FORGOT PASSWORD
+# ---------------------------------------------------------
+@router.post(
+    "/forgot-password",
+    summary="Solicitar recuperación de contraseña",
+)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+
+4) Buscar strings clave dentro del contenedor
+logout:
+143:@router.post("/logout", summary="Cerrar sesión")
+144:def logout(
+sesiones:
+178:@router.get("/sesiones", summary="Listar sesiones activas")
+179:def listar_sesiones(
+182:    sesiones = get_user_sessions(current_user.id)
+187:        "data": sesiones,
+189:            "total": len(sesiones)
+cerrar-sesion:
+198:    "/cerrar-sesion/{jti}",
+
+5) Ver __init__.py de api/v1 dentro del contenedor
+INIT_FILE=/app/app/api/v1/__init__.py
+from fastapi import APIRouter
+
+# =====================================================
+# IMPORTACIÓN DE ROUTERS DE ENDPOINTS
+# =====================================================
+
+# Administración de caché Redis
+from app.api.v1.endpoints.admin_cache import router as admin_cache_router
+
+# Circuit breakers / resiliencia de servicios externos
+from app.api.v1.endpoints.admin_circuit_breakers import router as admin_circuit_breakers_router
+
+# Eventos de seguridad registrados por el sistema
+from app.api.v1.endpoints.admin_security import router as admin_security_router
+
+# Autenticación JWT / OAuth
+from app.api.v1.endpoints.auth import router as auth_router
+
+# Configuración dinámica de CORS
+from app.api.v1.endpoints.configuracion_cors import router as configuracion_cors_router
+
+# Healthcheck del sistema
+from app.api.v1.endpoints.health import router as health_router
+
+# CRUD de items
+from app.api.v1.endpoints.items import router as items_router
+
+# Endpoints de reportes
+from app.api.v1.endpoints.reportes import router as reportes_router
+
+# Gestión de usuarios
+from app.api.v1.endpoints.usuarios import router as usuarios_router
+
+# =====================================================
+# ENDPOINTS DE HARDENING
+# =====================================================
+
+# security.txt (estándar para reporte de vulnerabilidades)
+from app.api.v1.endpoints.security_txt import router as security_txt_router
+
+# OpenID discovery (descubrimiento automático de endpoints OAuth)
+from app.api.v1.endpoints.openid_discovery import router as openid_router
+
+
+# =====================================================
+# ROUTER PRINCIPAL DE LA API V1
+# =====================================================
+
+api_router_v1 = APIRouter()
+
+
+# =====================================================
+# ITEMS
+# =====================================================
+
+api_router_v1.include_router(
+    items_router,
+    prefix="/items",
+    tags=["Items"],
+)
+
+
+# =====================================================
+# AUTENTICACIÓN
+# =====================================================
+
+api_router_v1.include_router(
+    auth_router,
+    prefix="/auth",
+    tags=["Auth"],
+)
+
+
+# =====================================================
+# CONFIGURACIÓN DINÁMICA DE CORS
+# =====================================================
+
+api_router_v1.include_router(
+    configuracion_cors_router,
+    tags=["CORS Admin"],
+)
+
+
+# =====================================================
+# HEALTHCHECK
+# =====================================================
+
+api_router_v1.include_router(
+    health_router,
+    tags=["Health"],
+)
+
+
+# =====================================================
+# USUARIOS
+# =====================================================
+
+api_router_v1.include_router(
+    usuarios_router,
+    prefix="/usuarios",
+    tags=["Usuarios"],
+)
+
+
+# =====================================================
+# ADMINISTRACIÓN DE CACHÉ
+# =====================================================
+
+api_router_v1.include_router(
+    admin_cache_router,
+    prefix="/admin/cache",
+    tags=["Admin Cache"],
+)
+
+
+# =====================================================
+# CIRCUIT BREAKERS / RESILIENCE
+# =====================================================
+
+api_router_v1.include_router(
+    admin_circuit_breakers_router,
+    prefix="/admin",
+    tags=["Admin Resilience"],
+)
+
+
+# =====================================================
+# EVENTOS DE SEGURIDAD
+# =====================================================
+
+api_router_v1.include_router(
+    admin_security_router,
+    tags=["Admin Security"],
+)
+
+
+# =====================================================
+# REPORTES
+# =====================================================
+
+api_router_v1.include_router(
+    reportes_router,
+    prefix="/reportes",
+    tags=["Reportes"],
+)
+
+
+# =====================================================
+# HARDENING ENDPOINTS
+# =====================================================
+
+# security.txt
+api_router_v1.include_router(
+    security_txt_router
+)
+
+# openid discovery
+api_router_v1.include_router(
+    openid_router
+)
+6) Ver main.py dentro del contenedor
+MAIN_FILE=/app/app/main.py
+from __future__ import annotations
+
+# =====================================================
+# IMPORTS
+# =====================================================
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+
+from prometheus_fastapi_instrumentator import Instrumentator
+from scalar_fastapi import get_scalar_api_reference
+
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from app.api.v1 import api_router_v1
+from app.api.v2 import api_router_v2
+from app.api.version import router as version_router
+from app.api.v1.endpoints.operaciones import router as operaciones_router
+from app.api.v1.endpoints.health import router as health_router
+
+from app.core.config import limiter, settings
+from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
+from app.core.logger import setup_logging
+
+from app.database.database import Base, SessionLocal, engine
+
+from app.discovery.consul_client import deregister_service, register_service
+
+from app.middlewares.audit_context import AuditContextMiddleware
+from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
+from app.middlewares.dynamic_cors import DynamicCORSMiddleware
+from app.middlewares.request_id import RequestIdMiddleware
+from app.middlewares.request_logging import RequestLoggingMiddleware
+from app.middlewares.security_headers import SecurityHeadersMiddleware
+from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
+from app.middlewares.threat_detection import ThreatDetectionMiddleware
+from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
+
+from app.routers.categorias import router as categorias_router
+from app.oauth.router import router as oauth_router
+
+from app.services.metrics_service import sync_active_items_gauge
+
+
+# =====================================================
+# OPENAPI TAGS
+# =====================================================
+
+OPENAPI_TAGS = [
+    {
+        "name": "Items",
+        "description": (
+            "Operaciones sobre items de inventario: creación, consulta, "
+            "filtros, paginación, soft delete, restauración, auditoría "
+            "y movimientos de stock."
+        ),
+    },
+    {
+        "name": "Auth",
+        "description": (
+            "Autenticación y autorización con JWT, refresh token "
+            "y control de acceso por roles."
+        ),
+    },
+    {
+        "name": "CORS Admin",
+        "description": "Administración dinámica de orígenes permitidos para CORS.",
+    },
+    {
+        "name": "Health",
+        "description": "Healthchecks y diagnóstico del servicio.",
+    },
+    {
+        "name": "Usuarios",
+        "description": "Gestión de usuarios y roles.",
+    },
+    {
+        "name": "Admin Cache",
+        "description": "Administración de caché Redis.",
+    },
+    {
+        "name": "Admin Resilience",
+        "description": "Diagnóstico de resiliencia y circuit breakers.",
+    },
+    {
+        "name": "Reportes",
+        "description": "Reportes operativos del sistema.",
+    },
+]
+
+
+# =====================================================
+# APP FACTORY
+# =====================================================
+
+def create_app() -> FastAPI:
+    """
+    Crea y configura la instancia principal de FastAPI.
+    """
+
+    setup_logging()
+
+    # -------------------------------------------------
+    # Hardening: ocultar docs en producción
+    # -------------------------------------------------
+    docs_url = "/docs"
+    redoc_url = "/redoc"
+    openapi_url = "/openapi.json"
+
+    if settings.APP_ENV == "production":
+        docs_url = None
+        redoc_url = None
+        openapi_url = None
+
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version="1.0.0",
+        description=(
+            "API JMV - FastAPI + SQLAlchemy + buenas prácticas.\n\n"
+            "Incluye autenticación JWT, RBAC, rate limiting, "
+            "caché con Redis, auditoría, sanitización, detección "
+            "de payloads sospechosos, CORS dinámico, métricas Prometheus "
+            "y tareas background con Celery."
+        ),
+        openapi_tags=OPENAPI_TAGS,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+    )
+
+    app.state.consul_service_id = None
+
+    # =================================================
+    # RATE LIMIT
+    # =================================================
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # =================================================
+    # MIDDLEWARES
+    # =================================================
+    app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(AuditContextMiddleware)
+    app.add_middleware(ThreatDetectionMiddleware)
+    app.add_middleware(ContentTypeValidationMiddleware)
+    app.add_middleware(DynamicCORSMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(SQLInjectionWarningMiddleware)
+    app.add_middleware(SecurityAnomalyMiddleware)
+
+    # =================================================
+    # DB / MÉTRICAS
+    # =================================================
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        sync_active_items_gauge(db)
+    finally:
+        db.close()
+
+    # =================================================
+    # CONSUL
+    # =================================================
+    @app.on_event("startup")
+    async def register_consul() -> None:
+        """
+        Registra el servicio en Consul si está habilitado.
+        """
+        if not settings.CONSUL_ENABLED:
+            return
+
+        service_id = register_service(
+            name=settings.SERVICE_NAME,
+            port=settings.SERVICE_PORT,
+            tags=settings.service_tags_list,
+        )
+        app.state.consul_service_id = service_id
+
+    @app.on_event("shutdown")
+    async def deregister_consul() -> None:
+        """
+        Da de baja el servicio en Consul al cerrar la app.
+        """
+        if not settings.CONSUL_ENABLED:
+            return
+
+        service_id = getattr(app.state, "consul_service_id", None)
+        if service_id:
+            deregister_service(service_id)
+
+    # =================================================
+    # EXCEPTION HANDLERS GLOBALES
+    # =================================================
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """
+        Formatea errores 422 de validación con el wrapper estándar.
+        """
+        errores = []
+
+        for err in exc.errors():
+            loc = " -> ".join(str(x) for x in err.get("loc", []))
+            msg = err.get("msg", "Error de validación")
+            errores.append(f"{loc}: {msg}")
+
+        request_id = getattr(request.state, "request_id", None)
+
+        return JSONResponse(
+            status_code=422,
+            content={
+                "success": False,
+                "message": "Error de validación en los datos enviados",
+                "data": {"errors": errores},
+                "metadata": {"request_id": request_id} if request_id else {},
+            },
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """
+        Formatea cualquier HTTPException con el wrapper estándar.
+        Esto cubre 401, 403, 404, etc.
+        """
+        request_id = getattr(request.state, "request_id", None)
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "success": False,
+                "message": str(exc.detail),
+                "data": None,
+                "metadata": {"request_id": request_id} if request_id else {},
+            },
+        )
+
+    @app.exception_handler(ItemNoEncontradoError)
+    async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
+        """
+        Convierte ItemNoEncontradoError a respuesta JSON estándar.
+        """
+        request_id = getattr(request.state, "request_id", None)
+
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "message": f"Item no encontrado con id={exc.item_id}",
+                "data": {"item_id": exc.item_id},
+                "metadata": {"request_id": request_id} if request_id else {},
+            },
+        )
+
+    @app.exception_handler(StockInsuficienteError)
+    async def stock_insuficiente_handler(request: Request, exc: StockInsuficienteError):
+
+======================================
+FIN INSPECCION
+======================================
