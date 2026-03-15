@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+# =============================================================
+# CONFIGURACIÓN DE ENTORNO PARA TESTS
+# =============================================================
+# IMPORTANTE:
+# Estas variables deben definirse ANTES de importar cualquier
+# módulo de app.*, porque settings se construye al importar.
+# =============================================================
+
+import os
+
+os.environ["APP_ENV"] = "test"
+os.environ["API_KEY"] = "dev-secret-key-change-me"
+os.environ["JWT_SECRET_KEY"] = "super-secret-jwt-key-test"
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+
+# =============================================================
+# IMPORTS GENERALES
+# =============================================================
+
 import random
 import string
 import sys
@@ -23,6 +42,13 @@ from sqlalchemy.orm import sessionmaker
 # Añadimos el root del proyecto al PYTHONPATH
 # -------------------------------------------------------------
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+# =============================================================
+# IMPORTS DE LA APP
+# =============================================================
+# Estos imports van DESPUÉS de configurar variables de entorno
+# para que settings cargue con valores correctos de test.
+# =============================================================
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password
@@ -56,8 +82,6 @@ def fake_redis():
     Instancia única de Redis fake para todos los tests.
     """
     return fakeredis.FakeRedis(decode_responses=True)
-
-
 @pytest.fixture(autouse=True)
 def override_redis(fake_redis, monkeypatch):
     """

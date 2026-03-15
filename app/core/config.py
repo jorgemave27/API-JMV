@@ -18,15 +18,23 @@ APP_ENV = os.getenv("APP_ENV", "development")
 # -----------------------------------------------------
 # Cargar secretos desde Vault ANTES de construir settings
 # -----------------------------------------------------
+# IMPORTANTE:
+# - En tests NO debemos pisar variables de entorno
+# - Si una variable ya existe en os.environ, se respeta
+# - Vault solo rellena faltantes
+# -----------------------------------------------------
 try:
-    if vault_client.enabled():
+    if APP_ENV != "test" and vault_client.enabled():
         secrets_data = vault_client.read_secret("secret/mi-api")
 
-        if "API_KEY" in secrets_data:
+        if "API_KEY" in secrets_data and not os.getenv("API_KEY"):
             os.environ["API_KEY"] = secrets_data["API_KEY"]
 
-        if "DB_PASSWORD" in secrets_data:
+        if "DB_PASSWORD" in secrets_data and not os.getenv("DB_PASSWORD"):
             os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
+
+        if "ENCRYPTION_KEY" in secrets_data and not os.getenv("ENCRYPTION_KEY"):
+            os.environ["ENCRYPTION_KEY"] = secrets_data["ENCRYPTION_KEY"]
 
 except Exception:
     # Vault no debe romper el arranque
@@ -38,11 +46,17 @@ except Exception:
 # =====================================================
 
 def rate_limit_key_func(request: Request) -> str:
+    """
+    Genera la clave para rate limiting.
+
+    Reglas:
+    - Si existe un JWT válido, usa el user_id / subject del token
+    - Si no existe o no es válido, usa la IP del cliente
+    """
 
     auth_header = request.headers.get("Authorization")
 
     if auth_header and auth_header.startswith("Bearer "):
-
         token = auth_header.replace("Bearer ", "").strip()
 
         try:
@@ -61,6 +75,9 @@ def rate_limit_key_func(request: Request) -> str:
 
 
 def dynamic_rate_limit(key: str) -> str:
+    """
+    Ejemplo de rate limit dinámico.
+    """
 
     if key.startswith("user:"):
         return "1000/minute"
@@ -125,6 +142,9 @@ class Settings(BaseSettings):
     EXTERNAL_HTTP_TIMEOUT_SECONDS: float = 3.0
     EXTERNAL_CACHE_TTL_SECONDS: int = 300
     RESILIENCE_MOCK_BASE_URL: str = "http://127.0.0.1:8000/api/v1/admin/resilience/mock-external"
+
+    # Seguridad / cifrado
+    ENCRYPTION_KEY: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",

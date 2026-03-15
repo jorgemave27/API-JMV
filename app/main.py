@@ -1,25 +1,34 @@
 from __future__ import annotations
 
+# =====================================================
+# IMPORTS
+# =====================================================
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+
 from prometheus_fastapi_instrumentator import Instrumentator
 from scalar_fastapi import get_scalar_api_reference
+
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.v1.endpoints.operaciones import router as operaciones_router
-from app.models.item_lectura import ItemLectura
 from app.api.v1 import api_router_v1
-from app.api.v1.endpoints.health import router as health_router
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
+from app.api.v1.endpoints.operaciones import router as operaciones_router
+from app.api.v1.endpoints.health import router as health_router
+
 from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
+
 from app.database.database import Base, SessionLocal, engine
+
 from app.discovery.consul_client import deregister_service, register_service
+
 from app.middlewares.audit_context import AuditContextMiddleware
 from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
@@ -29,14 +38,16 @@ from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
 from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
-from app.models.auditoria_item import AuditoriaItem
-from app.models.categoria import Categoria
-from app.models.configuracion_cors import ConfiguracionCors
-from app.models.item import Item
+
 from app.routers.categorias import router as categorias_router
 from app.oauth.router import router as oauth_router
+
 from app.services.metrics_service import sync_active_items_gauge
 
+
+# =====================================================
+# OPENAPI TAGS
+# =====================================================
 
 OPENAPI_TAGS = [
     {
@@ -46,10 +57,6 @@ OPENAPI_TAGS = [
             "filtros, paginación, soft delete, restauración, auditoría "
             "y movimientos de stock."
         ),
-        "externalDocs": {
-            "description": "Guía funcional de items",
-            "url": "https://example.com/docs/items",
-        },
     },
     {
         "name": "Auth",
@@ -57,58 +64,56 @@ OPENAPI_TAGS = [
             "Autenticación y autorización con JWT, refresh token "
             "y control de acceso por roles."
         ),
-        "externalDocs": {
-            "description": "Guía de autenticación",
-            "url": "https://example.com/docs/auth",
-        },
     },
     {
         "name": "CORS Admin",
-        "description": (
-            "Administración dinámica de orígenes permitidos para CORS "
-            "desde base de datos."
-        ),
+        "description": "Administración dinámica de orígenes permitidos para CORS.",
     },
     {
         "name": "Health",
-        "description": (
-            "Healthchecks, disponibilidad del servicio y endpoints "
-            "de diagnóstico."
-        ),
+        "description": "Healthchecks y diagnóstico del servicio.",
     },
     {
         "name": "Usuarios",
-        "description": (
-            "Gestión de usuarios, roles y operaciones relacionadas "
-            "con identidad del sistema."
-        ),
+        "description": "Gestión de usuarios y roles.",
     },
     {
         "name": "Admin Cache",
-        "description": (
-            "Administración de caché Redis, invalidación y diagnóstico "
-            "de almacenamiento temporal."
-        ),
+        "description": "Administración de caché Redis.",
     },
     {
         "name": "Admin Resilience",
-        "description": (
-            "Diagnóstico y pruebas de circuit breakers, resiliencia "
-            "y fallback cacheado para servicios externos."
-        ),
+        "description": "Diagnóstico de resiliencia y circuit breakers.",
     },
     {
         "name": "Reportes",
-        "description": (
-            "Endpoints de reportes operativos y procesos asociados "
-            "a stock y tareas de background."
-        ),
+        "description": "Reportes operativos del sistema.",
     },
 ]
 
 
+# =====================================================
+# APP FACTORY
+# =====================================================
+
 def create_app() -> FastAPI:
+    """
+    Crea y configura la instancia principal de FastAPI.
+    """
+
     setup_logging()
+
+    # -------------------------------------------------
+    # Hardening: ocultar docs en producción
+    # -------------------------------------------------
+    docs_url = "/docs"
+    redoc_url = "/redoc"
+    openapi_url = "/openapi.json"
+
+    if settings.APP_ENV == "production":
+        docs_url = None
+        redoc_url = None
+        openapi_url = None
 
     app = FastAPI(
         title=settings.APP_NAME,
@@ -120,24 +125,23 @@ def create_app() -> FastAPI:
             "de payloads sospechosos, CORS dinámico, métricas Prometheus "
             "y tareas background con Celery."
         ),
-        contact={
-            "name": "Equipo Backend",
-            "email": "dev@empresa.com",
-        },
-        license_info={
-            "name": "MIT",
-        },
         openapi_tags=OPENAPI_TAGS,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
     )
 
     app.state.consul_service_id = None
 
+    # =================================================
+    # RATE LIMIT
+    # =================================================
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+    # =================================================
+    # MIDDLEWARES
+    # =================================================
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(AuditContextMiddleware)
     app.add_middleware(ThreatDetectionMiddleware)
@@ -149,6 +153,9 @@ def create_app() -> FastAPI:
     app.add_middleware(SQLInjectionWarningMiddleware)
     app.add_middleware(SecurityAnomalyMiddleware)
 
+    # =================================================
+    # DB / MÉTRICAS
+    # =================================================
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
@@ -157,8 +164,14 @@ def create_app() -> FastAPI:
     finally:
         db.close()
 
+    # =================================================
+    # CONSUL
+    # =================================================
     @app.on_event("startup")
-    async def on_startup_register_consul() -> None:
+    async def register_consul() -> None:
+        """
+        Registra el servicio en Consul si está habilitado.
+        """
         if not settings.CONSUL_ENABLED:
             return
 
@@ -170,7 +183,10 @@ def create_app() -> FastAPI:
         app.state.consul_service_id = service_id
 
     @app.on_event("shutdown")
-    async def on_shutdown_deregister_consul() -> None:
+    async def deregister_consul() -> None:
+        """
+        Da de baja el servicio en Consul al cerrar la app.
+        """
         if not settings.CONSUL_ENABLED:
             return
 
@@ -178,9 +194,16 @@ def create_app() -> FastAPI:
         if service_id:
             deregister_service(service_id)
 
+    # =================================================
+    # EXCEPTION HANDLERS GLOBALES
+    # =================================================
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """
+        Formatea errores 422 de validación con el wrapper estándar.
+        """
         errores = []
+
         for err in exc.errors():
             loc = " -> ".join(str(x) for x in err.get("loc", []))
             msg = err.get("msg", "Error de validación")
@@ -200,6 +223,10 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
+        """
+        Formatea cualquier HTTPException con el wrapper estándar.
+        Esto cubre 401, 403, 404, etc.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -214,6 +241,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ItemNoEncontradoError)
     async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
+        """
+        Convierte ItemNoEncontradoError a respuesta JSON estándar.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -228,6 +258,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(StockInsuficienteError)
     async def stock_insuficiente_handler(request: Request, exc: StockInsuficienteError):
+        """
+        Convierte StockInsuficienteError a respuesta JSON estándar.
+        """
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -246,13 +279,74 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        """
+        Fallback global para cualquier excepción no controlada.
+        Mantiene formato estándar sin filtrar internals.
+        """
+        request_id = getattr(request.state, "request_id", None)
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "Error interno del servidor",
+                "data": None,
+                "metadata": {"request_id": request_id} if request_id else {},
+            },
+        )
+
+    # =================================================
+    # DOCS ALTERNATIVAS
+    # =================================================
     @app.get("/scalar", include_in_schema=False)
     async def scalar_docs() -> HTMLResponse:
+        """
+        Documentación alternativa con Scalar.
+        """
         return get_scalar_api_reference(
             openapi_url=app.openapi_url,
             title=f"{settings.APP_NAME} - Scalar",
         )
 
+    # =================================================
+    # WELL-KNOWN
+    # =================================================
+    @app.get("/.well-known/security.txt", include_in_schema=False)
+    async def security_txt():
+        """
+        Endpoint security.txt según RFC 9116.
+        """
+        content = """
+Contact: mailto:security@empresa.com
+Expires: 2030-12-31T23:59:59.000Z
+Preferred-Languages: es, en
+Policy: https://empresa.com/security-policy
+"""
+        return PlainTextResponse(content.strip())
+
+    @app.get("/.well-known/openid-configuration", include_in_schema=False)
+    async def openid_configuration():
+        """
+        Endpoint discovery simulado de OpenID Connect.
+        """
+        return JSONResponse(
+            {
+                "issuer": "http://localhost:8000",
+                "authorization_endpoint": "http://localhost:8000/oauth/authorize",
+                "token_endpoint": "http://localhost:8000/oauth/token",
+                "userinfo_endpoint": "http://localhost:8000/oauth/userinfo",
+                "jwks_uri": "http://localhost:8000/.well-known/jwks.json",
+                "response_types_supported": ["code"],
+                "subject_types_supported": ["public"],
+                "id_token_signing_alg_values_supported": ["HS256"],
+            }
+        )
+
+    # =================================================
+    # ROUTERS
+    # =================================================
     app.include_router(health_router)
     app.include_router(categorias_router)
     app.include_router(version_router, prefix="/api")
@@ -261,6 +355,9 @@ def create_app() -> FastAPI:
     app.include_router(operaciones_router, prefix="/api/v1")
     app.include_router(oauth_router)
 
+    # =================================================
+    # PROMETHEUS
+    # =================================================
     Instrumentator().instrument(app).expose(
         app,
         endpoint="/metrics",
@@ -270,4 +367,7 @@ def create_app() -> FastAPI:
     return app
 
 
+# =====================================================
+# APP INSTANCE
+# =====================================================
 app = create_app()

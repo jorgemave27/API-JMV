@@ -1,206 +1,198 @@
-"""
-Sistema de detección de anomalías e intrusiones.
-
-Detecta:
-- Fuerza bruta (401 repetidos)
-- Scraping (alto volumen requests)
-- Escaneo de endpoints (muchos 404 distintos)
-
-Utiliza Redis para contadores con TTL.
-"""
-
 from __future__ import annotations
 
-import ipaddress
-from typing import Optional
+# =====================================================
+# DETECTOR DE ANOMALÍAS
+# =====================================================
+# - Usa Redis para registrar patrones sospechosos
+# - Si Redis falla, NO rompe la app
+# - En tests puede coexistir sin bloquear todo
+# =====================================================
 
-from app.core.redis_client import redis_client
+import logging
+
+from app.core.config import settings
+
+try:
+    import redis
+    from redis.exceptions import RedisError
+except Exception:  # pragma: no cover
+    redis = None
+    RedisError = Exception
+
+
+# Logger local del módulo
+logger = logging.getLogger(__name__)
 
 
 class AnomalyDetector:
     """
-    Detector de anomalías basado en Redis.
+    Detector de anomalías con Redis.
+
+    Reglas:
+    - demasiados 401 -> posible fuerza bruta
+    - demasiados requests/min -> posible abuso
+    - demasiados 404 distintos -> posible escaneo
     """
 
-    # ------------------------------
-    # UMBRALES DE SEGURIDAD
-    # ------------------------------
-
-    MAX_401_ATTEMPTS = 10
-    WINDOW_401_SECONDS = 300
-
-    MAX_REQUESTS_PER_MINUTE = 500
-
-    MAX_404_ENDPOINTS = 20
-
-    BLOCK_TIME_SECONDS = 3600
-
-    # ------------------------------
-    # IPs / hosts explícitamente seguros
-    # ------------------------------
-    SAFE_IPS = {
-        "127.0.0.1",
-        "::1",
-        "localhost",
-        "unknown",
-        "host.docker.internal",
-        "api-jmv-api",
-        "gateway",
-        "nginx",
-    }
-
-    # ------------------------------
-
     def __init__(self) -> None:
-        self.redis = redis_client
+        self.enabled = True
 
-    # ------------------------------
-    # UTILIDADES
-    # ------------------------------
+        # Umbrales del reto
+        self.max_401_attempts = 10
+        self.max_requests_per_minute = 500
+        self.max_distinct_404 = 20
+        self.block_seconds = 3600  # 1 hora
+
+        self.redis_client = None
+
+        try:
+            if redis is not None:
+                self.redis_client = redis.from_url(
+                    settings.REDIS_URL,
+                    decode_responses=True,
+                )
+        except Exception:
+            self.redis_client = None
+
+    # =================================================
+    # KEYS
+    # =================================================
 
     def _key_401(self, ip: str) -> str:
         return f"security:401:{ip}"
 
-    def _key_rate(self, ip: str) -> str:
-        return f"security:rate:{ip}"
+    def _key_req(self, ip: str) -> str:
+        return f"security:req:{ip}"
 
     def _key_404(self, ip: str) -> str:
         return f"security:404:{ip}"
 
-    def _key_block(self, ip: str) -> str:
-        return f"security:block:{ip}"
+    def _key_blocked(self, ip: str) -> str:
+        return f"security:blocked:{ip}"
 
-    def is_safe_ip(self, ip: str) -> bool:
-        """
-        Determina si una IP o host es seguro para entorno local/dev.
-
-        Se consideran seguros:
-        - localhost
-        - loopback
-        - redes privadas RFC1918
-        - hosts comunes de Docker / reverse proxy local
-        """
-        if not ip:
-            return True
-
-        ip_normalized = ip.strip().lower()
-
-        if ip_normalized in self.SAFE_IPS:
-            return True
-
-        try:
-            parsed_ip = ipaddress.ip_address(ip_normalized)
-
-            if parsed_ip.is_loopback:
-                return True
-
-            if parsed_ip.is_private:
-                return True
-
-            return False
-
-        except ValueError:
-            # Si no parsea como IP, permitimos hosts típicos de red local/dev
-            if (
-                ip_normalized.startswith("172.")
-                or ip_normalized.startswith("192.168.")
-                or ip_normalized.startswith("10.")
-            ):
-                return True
-
-            return False
-
-    # ------------------------------
-    # BLOQUEO IP
-    # ------------------------------
-
-    def block_ip(self, ip: str) -> None:
-        """
-        Bloquea IP temporalmente.
-        Las IPs seguras nunca se bloquean.
-        """
-        if self.is_safe_ip(ip):
-            return
-
-        self.redis.setex(self._key_block(ip), self.BLOCK_TIME_SECONDS, "1")
+    # =================================================
+    # BLOQUEO
+    # =================================================
 
     def is_ip_blocked(self, ip: str) -> bool:
         """
-        Verifica si IP está bloqueada.
-        Las IPs seguras nunca se consideran bloqueadas.
+        Verifica si la IP está bloqueada.
         """
-        if self.is_safe_ip(ip):
+
+        if not self.redis_client:
             return False
 
-        return self.redis.exists(self._key_block(ip)) == 1
+        try:
+            return bool(self.redis_client.exists(self._key_blocked(ip)))
+        except RedisError:
+            return False
+        except Exception:
+            return False
 
-    # ------------------------------
-    # DETECCIÓN 401 (fuerza bruta)
-    # ------------------------------
-
-    def record_401(self, ip: str) -> Optional[str]:
+    def block_ip(self, ip: str, reason: str) -> None:
         """
-        Registra intento fallido de autenticación.
+        Bloquea temporalmente una IP.
         """
-        if self.is_safe_ip(ip):
-            return None
 
-        key = self._key_401(ip)
+        if not self.redis_client:
+            return
 
-        count = self.redis.incr(key)
+        try:
+            self.redis_client.setex(
+                self._key_blocked(ip),
+                self.block_seconds,
+                reason,
+            )
+            logger.warning("IP bloqueada por anomalía: ip=%s reason=%s", ip, reason)
+        except RedisError:
+            pass
+        except Exception:
+            pass
 
-        if count == 1:
-            self.redis.expire(key, self.WINDOW_401_SECONDS)
+    # =================================================
+    # EVENTOS 401
+    # =================================================
 
-        if count > self.MAX_401_ATTEMPTS:
-            self.block_ip(ip)
-            return "too_many_401"
-
-        return None
-
-    # ------------------------------
-    # RATE LIMIT
-    # ------------------------------
-
-    def record_request(self, ip: str) -> Optional[str]:
+    def record_401(self, ip: str) -> None:
         """
-        Registra requests por minuto.
+        Registra un 401 para una IP.
+        Si supera el umbral, se bloquea.
         """
-        if self.is_safe_ip(ip):
-            return None
 
-        key = self._key_rate(ip)
+        if not self.redis_client:
+            return
 
-        count = self.redis.incr(key)
+        try:
+            key = self._key_401(ip)
+            current = self.redis_client.incr(key)
 
-        if count == 1:
-            self.redis.expire(key, 60)
+            if current == 1:
+                self.redis_client.expire(key, 300)  # 5 min
 
-        if count > self.MAX_REQUESTS_PER_MINUTE:
-            return "rate_limit"
+            if current > self.max_401_attempts:
+                self.block_ip(ip, "too_many_401")
+        except RedisError:
+            pass
+        except Exception:
+            pass
 
-        return None
+    # =================================================
+    # EVENTOS REQUEST RATE
+    # =================================================
 
-    # ------------------------------
-    # SCANNER DETECTION
-    # ------------------------------
-
-    def record_404(self, ip: str, endpoint: str) -> Optional[str]:
+    def record_request(self, ip: str) -> None:
         """
-        Detecta escaneo de endpoints.
+        Registra volumen de requests por minuto.
         """
-        if self.is_safe_ip(ip):
-            return None
 
-        key = self._key_404(ip)
+        if not self.redis_client:
+            return
 
-        self.redis.sadd(key, endpoint)
-        self.redis.expire(key, 300)
+        try:
+            key = self._key_req(ip)
+            current = self.redis_client.incr(key)
 
-        count = self.redis.scard(key)
+            if current == 1:
+                self.redis_client.expire(key, 60)  # 1 minuto
 
-        if count > self.MAX_404_ENDPOINTS:
-            self.block_ip(ip)
-            return "scanner_detected"
+            if current > self.max_requests_per_minute:
+                self.block_ip(ip, "too_many_requests")
+        except RedisError:
+            pass
+        except Exception:
+            pass
 
-        return None
+    # =================================================
+    # EVENTOS 404 DISTINTOS
+    # =================================================
+
+    def record_404(self, ip: str, path: str) -> None:
+        """
+        Registra endpoints 404 distintos.
+        Si supera el umbral, se marca como scanner.
+        """
+
+        if not self.redis_client:
+            return
+
+        try:
+            key = self._key_404(ip)
+
+            self.redis_client.sadd(key, path)
+            self.redis_client.expire(key, 300)  # 5 min
+
+            distinct_count = self.redis_client.scard(key)
+
+            if distinct_count > self.max_distinct_404:
+                self.block_ip(ip, "scanner_detected")
+        except RedisError:
+            pass
+        except Exception:
+            pass
+
+
+# =====================================================
+# SINGLETON
+# =====================================================
+
+anomaly_detector = AnomalyDetector()
