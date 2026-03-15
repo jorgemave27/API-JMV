@@ -48,7 +48,7 @@ services:
       # -----------------------------------------------------
       # Consul
       # -----------------------------------------------------
-      CONSUL_ENABLED: "true"
+      CONSUL_ENABLED: "false"
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
 
@@ -77,8 +77,6 @@ services:
       kafka:
         condition: service_started
       rabbitmq:
-        condition: service_started
-      consul:
         condition: service_started
       vault:
         condition: service_started
@@ -119,6 +117,13 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: api-jmv-projection-consumer
       KAFKA_EVENTS_TOPIC: jmv.domain-events
+
+      # -----------------------------------------------------
+      # Consul
+      # -----------------------------------------------------
+      CONSUL_ENABLED: "false"
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
 
       EXTERNAL_HTTP_TIMEOUT_SECONDS: 3
       EXTERNAL_CACHE_TTL_SECONDS: 300
@@ -169,6 +174,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
 
+      # -----------------------------------------------------
+      # Consul
+      # -----------------------------------------------------
+      CONSUL_ENABLED: "false"
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root
 
@@ -211,6 +223,13 @@ services:
       CELERY_ENABLED: "true"
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+
+      # -----------------------------------------------------
+      # Consul
+      # -----------------------------------------------------
+      CONSUL_ENABLED: "false"
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
 
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root

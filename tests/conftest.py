@@ -1,21 +1,15 @@
 from __future__ import annotations
 
+import random
+import string
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
-
-# -------------------------------------------------------------
-# Añadimos el root del proyecto al PYTHONPATH
-# Esto permite importar módulos como:
-# from app.core.security import ...
-# -------------------------------------------------------------
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-import random
-import string
 from typing import Any
 
+import fakeredis
 import pytest
+import redis
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import (
@@ -25,11 +19,18 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import sessionmaker
 
-from app.core.config import settings
+# -------------------------------------------------------------
+# Añadimos el root del proyecto al PYTHONPATH
+# -------------------------------------------------------------
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password
 from app.database.database import Base, get_db, get_db_async
 from app.main import app
 from app.models.usuario import Usuario
+
+settings = get_settings()
 
 # -------------------------------------------------------------
 # Constantes globales usadas por los tests
@@ -40,11 +41,71 @@ ITEMS_BASE = f"{API_PREFIX}/items"
 
 # -------------------------------------------------------------
 # Contraseñas válidas para tests
-# (deben cumplir la política de seguridad)
 # -------------------------------------------------------------
 TEST_ADMIN_PASSWORD = "Test123!"
 TEST_EDITOR_PASSWORD = "Test123!"
 TEST_LECTOR_PASSWORD = "Test123!"
+
+
+# =============================================================
+# Fake Redis para tests
+# =============================================================
+@pytest.fixture(scope="session")
+def fake_redis():
+    """
+    Instancia única de Redis fake para todos los tests.
+    """
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture(autouse=True)
+def override_redis(fake_redis, monkeypatch):
+    """
+    Reemplaza Redis real por fakeredis en singletons ya cargados.
+    """
+
+    # 1) Constructor base redis
+    def fake_redis_constructor(*args, **kwargs):
+        return fake_redis
+
+    monkeypatch.setattr(redis, "Redis", fake_redis_constructor)
+    monkeypatch.setattr(redis, "StrictRedis", fake_redis_constructor)
+
+    # 2) Cliente redis centralizado
+    try:
+        import app.core.redis_client as redis_client_module
+
+        monkeypatch.setattr(redis_client_module, "redis_client", fake_redis)
+        monkeypatch.setattr(redis_client_module, "get_redis_client", lambda: fake_redis)
+    except Exception:
+        pass
+
+    # 3) Detector de anomalías
+    try:
+        import app.security.anomaly_detector as anomaly_detector_module
+
+        if hasattr(anomaly_detector_module, "redis_client"):
+            monkeypatch.setattr(anomaly_detector_module, "redis_client", fake_redis)
+    except Exception:
+        pass
+
+    # 4) Middleware con detector global ya instanciado
+    try:
+        import app.middlewares.security_anomaly as security_anomaly_module
+
+        if hasattr(security_anomaly_module, "detector"):
+            security_anomaly_module.detector.redis = fake_redis
+    except Exception:
+        pass
+
+    # 5) API key manager
+    try:
+        from app.core.api_key_manager import api_key_manager
+
+        api_key_manager.redis = fake_redis
+    except Exception:
+        pass
+
 
 
 # -------------------------------------------------------------
@@ -71,7 +132,11 @@ def build_async_test_database_url(database_url: str) -> str:
         return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
     if database_url.startswith("postgresql+psycopg2://"):
-        return database_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        return database_url.replace(
+            "postgresql+psycopg2://",
+            "postgresql+asyncpg://",
+            1,
+        )
 
     return database_url
 
@@ -161,8 +226,6 @@ def setup_db(tmp_path: Path):
     app.dependency_overrides.clear()
     settings.CACHE_ENABLED = original_cache_enabled
 
-    # IMPORTANTE:
-    # cerrar correctamente engines para evitar warnings
     import asyncio
 
     engine.dispose()
@@ -371,7 +434,6 @@ def create_item(
     codigo_sku: str = "AB-1234",
     categoria_id: int | None = None,
 ) -> dict[str, Any]:
-
     payload = {
         "name": name,
         "description": "para test",
@@ -401,7 +463,12 @@ def create_item(
 
     return body["data"]
 
-def get_items_wrapped(client: TestClient, auth_headers: dict[str, str], query: str = "") -> dict:
+
+def get_items_wrapped(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    query: str = "",
+) -> dict:
     """
     Obtiene listado de items y valida wrapper estándar.
     """
@@ -421,7 +488,11 @@ def get_items_wrapped(client: TestClient, auth_headers: dict[str, str], query: s
     return body
 
 
-def get_deleted_wrapped(client: TestClient, auth_headers: dict[str, str], query: str = "") -> dict:
+def get_deleted_wrapped(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    query: str = "",
+) -> dict:
     """
     Obtiene listado de items eliminados y valida wrapper estándar.
     """

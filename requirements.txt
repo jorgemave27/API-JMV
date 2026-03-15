@@ -29,6 +29,7 @@ distlib==0.4.0
 dnspython==2.8.0
 ecdsa==0.19.1
 email-validator==2.3.0
+fakeredis==2.34.1
 fastapi==0.135.1
 filelock==3.25.0
 flake8==7.3.0
@@ -95,6 +96,7 @@ scalar_fastapi==1.8.0
 setuptools==82.0.1
 six==1.17.0
 slowapi==0.1.9
+sortedcontainers==2.4.0
 SQLAlchemy==2.0.48
 starlette==0.52.1
 stevedore==5.7.0

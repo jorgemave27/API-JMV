@@ -28,6 +28,7 @@ from app.middlewares.request_logging import RequestLoggingMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
+from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.models.auditoria_item import AuditoriaItem
 from app.models.categoria import Categoria
 from app.models.configuracion_cors import ConfiguracionCors
@@ -146,6 +147,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(SQLInjectionWarningMiddleware)
+    app.add_middleware(SecurityAnomalyMiddleware)
 
     Base.metadata.create_all(bind=engine)
 

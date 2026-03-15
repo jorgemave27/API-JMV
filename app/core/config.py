@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 from fastapi import Request
 from pydantic import field_validator
@@ -28,21 +29,20 @@ try:
             os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
 
 except Exception:
-    # Si Vault falla no bloquea el arranque
+    # Vault no debe romper el arranque
     pass
 
 
-def rate_limit_key_func(request: Request) -> str:
-    """
-    Genera la clave para rate limiting.
+# =====================================================
+# Rate limiting
+# =====================================================
 
-    Reglas:
-    - Si existe un JWT válido, usa el user_id / subject del token
-    - Si no existe o no es válido, usa la IP del cliente
-    """
+def rate_limit_key_func(request: Request) -> str:
+
     auth_header = request.headers.get("Authorization")
 
     if auth_header and auth_header.startswith("Bearer "):
+
         token = auth_header.replace("Bearer ", "").strip()
 
         try:
@@ -61,9 +61,7 @@ def rate_limit_key_func(request: Request) -> str:
 
 
 def dynamic_rate_limit(key: str) -> str:
-    """
-    Define el límite dinámico según la clave calculada por key_func.
-    """
+
     if key.startswith("user:"):
         return "1000/minute"
 
@@ -73,7 +71,12 @@ def dynamic_rate_limit(key: str) -> str:
 limiter = Limiter(key_func=rate_limit_key_func)
 
 
+# =====================================================
+# Settings
+# =====================================================
+
 class Settings(BaseSettings):
+
     DATABASE_URL: str
     API_KEY: str
     APP_VERSION: str = "1.0.0"
@@ -97,17 +100,18 @@ class Settings(BaseSettings):
     CACHE_TTL_ITEM_SECONDS: int = 300
     CACHE_TTL_LIST_SECONDS: int = 300
 
+    # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     CELERY_ENABLED: bool = False
 
-    # Kafka / Event Sourcing
+    # Kafka
     KAFKA_ENABLED: bool = True
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
     KAFKA_CLIENT_ID: str = "api-jmv"
     KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
 
-    # Consul / Service Discovery
+    # Consul
     CONSUL_ENABLED: bool = False
     CONSUL_HOST: str = "localhost"
     CONSUL_PORT: int = 8500
@@ -117,7 +121,7 @@ class Settings(BaseSettings):
     SERVICE_PORT: int = 8000
     SERVICE_TAGS: str = "api,fastapi,jmv"
 
-    # Resilience / Circuit Breaker
+    # Resilience
     EXTERNAL_HTTP_TIMEOUT_SECONDS: float = 3.0
     EXTERNAL_CACHE_TTL_SECONDS: int = 300
     RESILIENCE_MOCK_BASE_URL: str = "http://127.0.0.1:8000/api/v1/admin/resilience/mock-external"
@@ -128,6 +132,10 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    # -------------------------------------------------
+    # Helpers
+    # -------------------------------------------------
 
     @property
     def cors_allow_origins_list(self) -> list[str]:
@@ -145,6 +153,10 @@ class Settings(BaseSettings):
             if tag.strip()
         ]
 
+    # -------------------------------------------------
+    # Validaciones
+    # -------------------------------------------------
+
     @field_validator("API_KEY")
     @classmethod
     def validate_api_key_length(cls, value: str) -> str:
@@ -160,4 +172,13 @@ class Settings(BaseSettings):
         return value
 
 
-settings = Settings()
+# =====================================================
+# Singleton settings
+# =====================================================
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
