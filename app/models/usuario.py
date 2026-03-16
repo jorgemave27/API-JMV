@@ -18,6 +18,7 @@ class Usuario(Base):
     - Permite bloqueo temporal por fuerza bruta
     - Permite reset seguro con token de un solo uso
     - Campos sensibles cifrados a nivel de base de datos
+    - Soporte para cumplimiento ARCO / GDPR / LFPDPPP
     """
 
     __tablename__ = "usuarios"
@@ -32,6 +33,15 @@ class Usuario(Base):
         unique=True,
         nullable=False,
         index=True
+    )
+
+    # -------------------------------------------------------------
+    # Datos personales
+    # -------------------------------------------------------------
+    nombre = Column(
+        String(255),
+        nullable=True,
+        comment="Nombre del usuario"
     )
 
     # -------------------------------------------------------------
@@ -114,4 +124,18 @@ class Usuario(Base):
         DateTime,
         nullable=False,
         default=datetime.utcnow
+    )
+
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
+    # Se usará después para retención automática de datos
+    # y reportes de actividad de datos personales.
+    ultimo_acceso_at = Column(
+        DateTime,
+        nullable=True
     )

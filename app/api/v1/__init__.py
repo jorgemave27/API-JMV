@@ -41,6 +41,8 @@ from app.api.v1.endpoints.security_txt import router as security_txt_router
 # OpenID discovery (descubrimiento automático de endpoints OAuth)
 from app.api.v1.endpoints.openid_discovery import router as openid_router
 
+from app.api.v1.endpoints import gdpr
+
 
 # =====================================================
 # ROUTER PRINCIPAL DE LA API V1
@@ -158,3 +160,5 @@ api_router_v1.include_router(
 api_router_v1.include_router(
     openid_router
 )
+
+api_router_v1.include_router(gdpr.router, tags=["GDPR"])

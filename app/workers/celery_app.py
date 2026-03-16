@@ -1,64 +1,109 @@
-"""
-Configuración central de Celery para la API JMV.
-
-Este módulo:
-- Inicializa la app de Celery
-- Permite usar Redis en ejecución normal
-- Permite usar modo eager + backend en memoria durante tests/build de Docker
-- Agenda la rotación automática de API key cada 24 horas
-"""
-
 from __future__ import annotations
 
-import os
+"""
+Celery configuration for API-JMV.
+
+Este módulo configura:
+- Celery worker
+- Celery Beat scheduler
+- Redis como broker y backend
+- Registro de tareas background
+
+Arquitectura actual del proyecto:
+
+FastAPI
+   │
+   ├── Celery Worker
+   │       └── tareas async
+   │
+   ├── Celery Beat
+   │       └── tareas programadas
+   │
+   └── Redis
+           ├── cache
+           ├── sessions
+           └── celery broker
+"""
+
+# ==========================================================
+# IMPORTS
+# ==========================================================
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
+# ----------------------------------------------------------
+# IMPORTAR TAREAS
+# ----------------------------------------------------------
 
-def _env_bool(name: str, default: str = "false") -> bool:
-    """
-    Convierte variables de entorno tipo texto a bool.
-    """
-    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+# IMPORTANTE:
+# Celery necesita importar las tareas para registrarlas.
 
+from app.tasks.data_retention import ejecutar_retencion_datos
 
-broker_url = os.getenv("CELERY_BROKER_URL", settings.REDIS_URL)
-result_backend = os.getenv("CELERY_RESULT_BACKEND", settings.REDIS_URL)
-
-task_always_eager = _env_bool("CELERY_TASK_ALWAYS_EAGER", "false")
-task_eager_propagates = _env_bool("CELERY_TASK_EAGER_PROPAGATES", "true")
-task_store_eager_result = _env_bool("CELERY_TASK_STORE_EAGER_RESULT", "false")
+# ==========================================================
+# CREACIÓN DE APP CELERY
+# ==========================================================
 
 celery_app = Celery(
     "api_jmv",
-    broker=broker_url,
-    backend=result_backend,
-    include=[
-        "app.workers.tasks",
-        "app.workers.rotate_api_key_task",
-    ],
+    broker=settings.CELERY_BROKER_URL,
+    backend=settings.CELERY_RESULT_BACKEND,
 )
+
+# ==========================================================
+# CONFIGURACIÓN GENERAL
+# ==========================================================
 
 celery_app.conf.update(
-    broker_url=broker_url,
-    result_backend=result_backend,
+
+    # Serialización segura
     task_serializer="json",
-    accept_content=["json"],
     result_serializer="json",
+    accept_content=["json"],
+
+    # Zona horaria
     timezone="UTC",
     enable_utc=True,
-    task_track_started=True,
-    task_always_eager=task_always_eager,
-    task_eager_propagates=task_eager_propagates,
-    task_store_eager_result=task_store_eager_result,
+
+    # Reintentos automáticos
+    task_acks_late=True,
+
+    # Evita duplicados si el worker cae
+    worker_prefetch_multiplier=1,
+
+    # ======================================================
+    # CELERY BEAT (TAREAS PROGRAMADAS)
+    # ======================================================
+
     beat_schedule={
-        "rotate-api-key-every-24-hours": {
-            "task": "app.workers.rotate_api_key_task.rotate_api_key_task",
-            "schedule": 86400.0,
+
+        # --------------------------------------------------
+        # TAREA 103
+        # Retención automática de datos personales
+        # GDPR / LFPDPPP
+        # --------------------------------------------------
+
+        "gdpr-data-retention-job": {
+            "task": "app.tasks.data_retention.ejecutar_retencion_datos",
+            "schedule": crontab(hour=3, minute=0),
         },
+
     },
+
 )
 
-celery = celery_app
+# ==========================================================
+# REGISTRO MANUAL DE TAREAS
+# ==========================================================
+
+
+@celery_app.task(name="app.tasks.data_retention.ejecutar_retencion_datos")
+def celery_retention_job():
+    """
+    Wrapper Celery para ejecutar el job de retención.
+    """
+
+    ejecutar_retencion_datos()

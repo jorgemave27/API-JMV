@@ -1,36 +1,60 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database.database import SessionLocal
-from app.models.categoria import Categoria  # noqa: F401
+from app.models.categoria import Categoria  # noqa
 from app.models.item import Item
 from app.models.reporte_stock import ReporteStock
+from app.models.usuario import Usuario
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _anon_email(email: str, user_id: int) -> str:
+    digest = _sha256(email)
+    return f"anon-{user_id}-{digest[:20]}@anon.local"
+
+
+def _anon_name(name: str | None, user_id: int) -> str:
+    base = name or f"user-{user_id}"
+    digest = _sha256(base)
+    return f"anon-{digest[:16]}"
+
+
+def _anon_rfc(rfc: str | None, user_id: int) -> str | None:
+    if not rfc:
+        return None
+    return _sha256(f"{user_id}:{rfc}")
+
+
 @celery_app.task(name="app.workers.tasks.enviar_notificacion")
 def enviar_notificacion(item_id: int, email: str) -> dict:
-    """
-    Simula el envío de una notificación por email.
-    """
     logger.info(
         "Iniciando envío de notificación para item_id=%s a email=%s",
         item_id,
         email,
     )
+
     time.sleep(2)
+
     logger.info(
         "Notificación enviada para item_id=%s a email=%s",
         item_id,
         email,
     )
+
     return {
         "item_id": item_id,
         "email": email,
@@ -40,14 +64,12 @@ def enviar_notificacion(item_id: int, email: str) -> dict:
 
 @celery_app.task(name="app.workers.tasks.generar_reporte_stock_bajo")
 def generar_reporte_stock_bajo() -> dict:
-    """
-    Genera un reporte de items con stock bajo (< 5) y lo guarda en BD.
-    """
     db: Session = SessionLocal()
+
     try:
         stmt = (
             select(Item)
-            .where(Item.eliminado == False)  # noqa: E712
+            .where(Item.eliminado == False)  # noqa
             .where(Item.stock < 5)
             .order_by(Item.stock.asc(), Item.id.asc())
         )
@@ -88,5 +110,61 @@ def generar_reporte_stock_bajo() -> dict:
             "total_items": reporte.total_items,
             "status": "generado",
         }
+
+    finally:
+        db.close()
+
+
+# =====================================================
+# GDPR DATA RETENTION TASK
+# =====================================================
+
+@celery_app.task(name="app.workers.tasks.anonimizar_usuarios_inactivos")
+def anonimizar_usuarios_inactivos() -> dict:
+    """
+    Anonimiza usuarios inactivos > 3 años.
+
+    Cumple GDPR / LFPDPPP.
+    """
+
+    db: Session = SessionLocal()
+
+    try:
+
+        limite = datetime.utcnow() - timedelta(days=365 * 3)
+
+        stmt = select(Usuario).where(
+            Usuario.ultimo_acceso_at != None,  # noqa
+            Usuario.ultimo_acceso_at < limite,
+            Usuario.activo == True,  # noqa
+        )
+
+        usuarios = db.execute(stmt).scalars().all()
+
+        total = 0
+
+        for user in usuarios:
+
+            user.email = _anon_email(user.email, user.id)
+            user.nombre = _anon_name(user.nombre, user.id)
+            user.rfc = _anon_rfc(user.rfc, user.id)
+
+            user.activo = False
+            user.updated_at = datetime.utcnow()
+
+            total += 1
+
+        db.commit()
+
+        logger.info(
+            "GDPR retention ejecutado usuarios_anonimizados=%s",
+            total,
+        )
+
+        return {
+            "usuarios_anonimizados": total,
+            "status": "ok",
+        }
+
     finally:
         db.close()
