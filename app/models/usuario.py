@@ -32,7 +32,7 @@ class Usuario(Base):
         String(255),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
 
     # -------------------------------------------------------------
@@ -41,32 +41,28 @@ class Usuario(Base):
     nombre = Column(
         String(255),
         nullable=True,
-        comment="Nombre del usuario"
+        comment="Nombre del usuario",
     )
 
     # -------------------------------------------------------------
     # Datos sensibles cifrados
     # -------------------------------------------------------------
-    # RFC almacenado cifrado usando AES-256-GCM.
-    # Cuando SQLAlchemy guarda el valor → se cifra automáticamente
-    # Cuando SQLAlchemy lee el valor → se descifra automáticamente
-    # En la base de datos el valor se verá como texto cifrado.
+    # RFC almacenado cifrado con envelope encryption.
+    # La clave maestra vive en KMS (AWS) o provider local para desarrollo.
+    # SQLAlchemy cifra al guardar y descifra al leer automáticamente.
     rfc = Column(
         EncryptedString(255),
         nullable=True,
         index=True,
-        comment="RFC cifrado AES-256-GCM"
+        comment="RFC cifrado con KMS envelope encryption",
     )
 
     # -------------------------------------------------------------
     # Contraseña segura
     # -------------------------------------------------------------
-    # IMPORTANTE:
-    # Aquí solo se guarda el hash de la contraseña, nunca la contraseña
-    # en texto plano.
     hashed_password = Column(
         String(255),
-        nullable=False
+        nullable=False,
     )
 
     # -------------------------------------------------------------
@@ -75,14 +71,14 @@ class Usuario(Base):
     activo = Column(
         Boolean,
         nullable=False,
-        default=True
+        default=True,
     )
 
     # Roles válidos: admin, editor, lector
     rol = Column(
         String(50),
         nullable=False,
-        default="lector"
+        default="lector",
     )
 
     # -------------------------------------------------------------
@@ -91,12 +87,12 @@ class Usuario(Base):
     failed_login_attempts = Column(
         Integer,
         nullable=False,
-        default=0
+        default=0,
     )
 
     blocked_until = Column(
         DateTime,
-        nullable=True
+        nullable=True,
     )
 
     # -------------------------------------------------------------
@@ -104,17 +100,17 @@ class Usuario(Base):
     # -------------------------------------------------------------
     reset_token_hash = Column(
         String(255),
-        nullable=True
+        nullable=True,
     )
 
     reset_token_expires_at = Column(
         DateTime,
-        nullable=True
+        nullable=True,
     )
 
     reset_token_used_at = Column(
         DateTime,
-        nullable=True
+        nullable=True,
     )
 
     # -------------------------------------------------------------
@@ -123,19 +119,19 @@ class Usuario(Base):
     created_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow
+        default=datetime.utcnow,
     )
 
     updated_at = Column(
         DateTime,
         nullable=False,
         default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        onupdate=datetime.utcnow,
     )
 
     # Se usará después para retención automática de datos
     # y reportes de actividad de datos personales.
     ultimo_acceso_at = Column(
         DateTime,
-        nullable=True
+        nullable=True,
     )

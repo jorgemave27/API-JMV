@@ -1,98 +1,54 @@
+from __future__ import annotations
+
 """
 Encryption utilities for sensitive data.
 
-AES-256-GCM encryption used for field level encryption in database.
-Compatible with Vault / ENV configuration used in API-JMV.
+Task 66:
+- Integración con KMSProvider
+- Envelope encryption
+- Compatibilidad con el TypeDecorator existente
 """
 
-from __future__ import annotations
+from sqlalchemy.types import TEXT, TypeDecorator
 
-import base64
-import os
-
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-from app.core.config import settings
+from app.security.kms import decrypt_with_envelope, encrypt_with_envelope
 
 
-def _load_key() -> bytes:
+def encrypt(plaintext: str | None) -> str | None:
     """
-    Load encryption key.
-
-    Priority:
-    1. Vault secret (if loaded into settings)
-    2. ENV variable ENCRYPTION_KEY
-
-    Must be base64 encoded 32 bytes.
+    Cifra texto usando envelope encryption.
     """
-
-    key = None
-
-    # Si Vault cargó la key dentro de settings
-    if hasattr(settings, "ENCRYPTION_KEY"):
-        key = settings.ENCRYPTION_KEY
-
-    # fallback ENV
-    if not key:
-        key = os.getenv("ENCRYPTION_KEY")
-
-    if not key:
-        raise RuntimeError("ENCRYPTION_KEY not configured")
-
-    key_bytes = base64.b64decode(key)
-
-    if len(key_bytes) != 32:
-        raise RuntimeError("ENCRYPTION_KEY must be 32 bytes")
-
-    return key_bytes
-
-
-def encrypt(plaintext: str) -> str:
-    """
-    Encrypt plaintext using AES-256-GCM.
-    """
-
     if plaintext is None:
         return None
 
-    key = _load_key()
-
-    aesgcm = AESGCM(key)
-
-    nonce = os.urandom(12)
-
-    ciphertext = aesgcm.encrypt(
-        nonce,
-        plaintext.encode(),
-        None
-    )
-
-    encrypted = nonce + ciphertext
-
-    return base64.b64encode(encrypted).decode()
+    return encrypt_with_envelope(plaintext)
 
 
-def decrypt(ciphertext: str) -> str:
+def decrypt(ciphertext: str | None) -> str | None:
     """
-    Decrypt ciphertext produced by encrypt().
+    Descifra texto generado por encrypt().
     """
-
     if ciphertext is None:
         return None
 
-    key = _load_key()
+    return decrypt_with_envelope(ciphertext)
 
-    aesgcm = AESGCM(key)
 
-    raw = base64.b64decode(ciphertext)
+class EncryptedString(TypeDecorator):
+    """
+    TypeDecorator para cifrado transparente.
+    """
+    impl = TEXT
+    cache_ok = True
 
-    nonce = raw[:12]
-    data = raw[12:]
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
 
-    decrypted = aesgcm.decrypt(
-        nonce,
-        data,
-        None
-    )
+        return encrypt(value)
 
-    return decrypted.decode()
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+
+        return decrypt(value)

@@ -33,8 +33,23 @@ try:
         if "DB_PASSWORD" in secrets_data and not os.getenv("DB_PASSWORD"):
             os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
 
+        # compat legacy opcional
         if "ENCRYPTION_KEY" in secrets_data and not os.getenv("ENCRYPTION_KEY"):
             os.environ["ENCRYPTION_KEY"] = secrets_data["ENCRYPTION_KEY"]
+
+        # KMS local para desarrollo / fallback
+        if "LOCAL_KMS_MASTER_KEY" in secrets_data and not os.getenv("LOCAL_KMS_MASTER_KEY"):
+            os.environ["LOCAL_KMS_MASTER_KEY"] = secrets_data["LOCAL_KMS_MASTER_KEY"]
+
+        # KMS AWS
+        if "AWS_KMS_KEY_ID" in secrets_data and not os.getenv("AWS_KMS_KEY_ID"):
+            os.environ["AWS_KMS_KEY_ID"] = secrets_data["AWS_KMS_KEY_ID"]
+
+        if "AWS_REGION" in secrets_data and not os.getenv("AWS_REGION"):
+            os.environ["AWS_REGION"] = secrets_data["AWS_REGION"]
+
+        if "KMS_PROVIDER" in secrets_data and not os.getenv("KMS_PROVIDER"):
+            os.environ["KMS_PROVIDER"] = secrets_data["KMS_PROVIDER"]
 
 except Exception:
     # Vault no debe romper el arranque
@@ -143,8 +158,18 @@ class Settings(BaseSettings):
     EXTERNAL_CACHE_TTL_SECONDS: int = 300
     RESILIENCE_MOCK_BASE_URL: str = "http://127.0.0.1:8000/api/v1/admin/resilience/mock-external"
 
-    # Seguridad / cifrado
+    # -------------------------------------------------
+    # Seguridad / cifrado legacy
+    # -------------------------------------------------
     ENCRYPTION_KEY: str | None = None
+
+    # -------------------------------------------------
+    # KMS / Envelope Encryption
+    # -------------------------------------------------
+    KMS_PROVIDER: str = "local"
+    LOCAL_KMS_MASTER_KEY: str | None = None
+    AWS_KMS_KEY_ID: str | None = None
+    AWS_REGION: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
@@ -190,6 +215,16 @@ class Settings(BaseSettings):
         if len(value) < 16:
             raise ValueError("JWT_SECRET_KEY debe tener al menos 16 caracteres")
         return value
+
+    @field_validator("KMS_PROVIDER")
+    @classmethod
+    def validate_kms_provider(cls, value: str) -> str:
+        normalized = value.lower().strip()
+
+        if normalized not in {"local", "aws"}:
+            raise ValueError("KMS_PROVIDER debe ser 'local' o 'aws'")
+
+        return normalized
 
 
 # =====================================================
