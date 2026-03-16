@@ -218,6 +218,10 @@ def create_app() -> FastAPI:
             },
         )
 
+    # =================================================
+    # HANDLER ITEM NO ENCONTRADO (FIX TEST)
+    # =================================================
+
     @app.exception_handler(ItemNoEncontradoError)
     async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
 
@@ -227,11 +231,15 @@ def create_app() -> FastAPI:
             status_code=404,
             content={
                 "success": False,
-                "message": f"Item no encontrado {exc.item_id}",
-                "data": None,
+                "message": exc.message,
+                "data": {"item_id": exc.item_id},
                 "metadata": {"request_id": request_id} if request_id else {},
             },
         )
+
+    # =================================================
+    # HANDLER STOCK INSUFICIENTE (FIX TEST)
+    # =================================================
 
     @app.exception_handler(StockInsuficienteError)
     async def stock_handler(request: Request, exc: StockInsuficienteError):
@@ -242,8 +250,11 @@ def create_app() -> FastAPI:
             status_code=409,
             content={
                 "success": False,
-                "message": "Stock insuficiente",
-                "data": None,
+                "message": exc.message,
+                "data": {
+                    "item_id": exc.item_id,
+                    "stock_actual": exc.stock_actual,
+                },
                 "metadata": {"request_id": request_id} if request_id else {},
             },
         )
