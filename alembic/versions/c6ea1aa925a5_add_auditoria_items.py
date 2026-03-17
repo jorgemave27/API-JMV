@@ -1,4 +1,4 @@
-"""add auditoria_items"""
+"""add auditoria_items (SQLITE SAFE + PROD READY)"""
 
 from alembic import op
 import sqlalchemy as sa
@@ -15,34 +15,41 @@ def upgrade() -> None:
     """
     Crea la tabla de auditoría de items.
 
-    Nota:
-    - No se intenta borrar ix_configuracion_cors_id porque en PostgreSQL
-      ese índice no existe como índice independiente; el PRIMARY KEY ya
-      cubre la columna id.
+    🔥 Compatible con SQLite y PostgreSQL
+    🔥 Sin funciones SQL no soportadas (now())
+    🔥 Defaults manejados desde Python
     """
+
     op.create_table(
         "auditoria_items",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+
+        # referencia al item
         sa.Column("item_id", sa.Integer(), nullable=False),
-        sa.Column("accion", sa.String(length=50), nullable=False),
+
+        # acción (CREATE, UPDATE, DELETE)
+        sa.Column("accion", sa.String(length=20), nullable=False),
+
+        # snapshots
         sa.Column("datos_anteriores", sa.JSON(), nullable=True),
         sa.Column("datos_nuevos", sa.JSON(), nullable=True),
-        sa.Column("usuario", sa.String(length=255), nullable=True),
-        sa.Column(
-            "activo",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text("true"),
-        ),
-        sa.Column(
-            "creado_en",
-            sa.DateTime(),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+
+        # usuario responsable (ajustado a tu modelo actual)
+        sa.Column("usuario_id", sa.Integer(), nullable=True),
+
+        # 🔥 eliminado "activo" (no lo estás usando en el modelo actual)
+
+        # 🔥 timestamp SIN server_default (lo maneja Python)
+        sa.Column("timestamp", sa.DateTime(), nullable=True),
+
+        # 🔥 ip cliente
+        sa.Column("ip_cliente", sa.String(length=64), nullable=True),
+
+        # FK
         sa.ForeignKeyConstraint(["item_id"], ["items.id"], ondelete="CASCADE"),
     )
 
+    # índices
     op.create_index(
         "ix_auditoria_items_item_id",
         "auditoria_items",
@@ -58,9 +65,9 @@ def upgrade() -> None:
     )
 
     op.create_index(
-        "ix_auditoria_items_creado_en",
+        "ix_auditoria_items_timestamp",
         "auditoria_items",
-        ["creado_en"],
+        ["timestamp"],
         unique=False,
     )
 
@@ -69,7 +76,8 @@ def downgrade() -> None:
     """
     Elimina la tabla de auditoría de items.
     """
-    op.drop_index("ix_auditoria_items_creado_en", table_name="auditoria_items")
+
+    op.drop_index("ix_auditoria_items_timestamp", table_name="auditoria_items")
     op.drop_index("ix_auditoria_items_accion", table_name="auditoria_items")
     op.drop_index("ix_auditoria_items_item_id", table_name="auditoria_items")
     op.drop_table("auditoria_items")

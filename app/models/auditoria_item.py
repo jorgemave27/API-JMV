@@ -13,14 +13,14 @@ class AuditoriaItem(Base):
 
     Registra:
     - qué item cambió
-    - qué acción ocurrió
+    - qué acción ocurrió (CREATE / UPDATE / DELETE)
     - estado anterior
     - estado nuevo
     - usuario responsable
     - timestamp
     - IP del cliente
 
-    Esta tabla permite trazabilidad completa y reconstrucción histórica.
+    Compatible con SQLite y PostgreSQL.
     """
 
     __tablename__ = "auditoria_items"
@@ -36,8 +36,7 @@ class AuditoriaItem(Base):
     item_id = Column(Integer, nullable=False, index=True)
 
     # -------------------------------------------------------------
-    # Acción realizada:
-    # CREATE / UPDATE / DELETE
+    # Acción realizada
     # -------------------------------------------------------------
     accion = Column(String(20), nullable=False, index=True)
 
@@ -48,12 +47,18 @@ class AuditoriaItem(Base):
     datos_nuevos = Column(JSON, nullable=True)
 
     # -------------------------------------------------------------
-    # Usuario responsable del cambio
+    # Usuario responsable
     # -------------------------------------------------------------
     usuario_id = Column(Integer, nullable=True, index=True)
 
     # -------------------------------------------------------------
     # Metadata de trazabilidad
     # -------------------------------------------------------------
-    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    timestamp = Column(
+        DateTime,
+        default=datetime.utcnow,  # ✅ compatible SQLite/Postgres
+        nullable=False,
+        index=True
+    )
+
     ip_cliente = Column(String(64), nullable=True)
