@@ -26,7 +26,10 @@ from app.core.cache import (
 from app.core.config import dynamic_rate_limit, limiter, settings
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
-from app.core.metrics import ITEMS_CREATED_BY_CATEGORY
+from app.core.metrics import (
+    ITEMS_CREATED_BY_CATEGORY,
+    increment_crud_operation,
+)
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
 from app.core.security import require_role, verify_api_key
@@ -47,7 +50,11 @@ from app.schemas.domain_event import DomainEvent
 from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.movimiento_stock import TransferirStockRequest
 from app.schemas.pagination import PaginatedResponse
-from app.services.metrics_service import sync_active_items_gauge
+from app.services.metrics_service import (
+    measure_db_query,
+    measure_db_query_async,
+    sync_active_items_gauge,
+)
 from app.workers.tasks import enviar_notificacion
 
 router = APIRouter()
@@ -58,6 +65,9 @@ LOW_STOCK_THRESHOLD = 5
 
 
 def _publicar_evento_item(routing_key: str, payload: dict) -> None:
+    """
+    Publica un evento simple a RabbitMQ para integración legacy.
+    """
     import asyncio
 
     rabbitmq_url = getattr(
@@ -86,10 +96,16 @@ def _publicar_evento_item(routing_key: str, payload: dict) -> None:
 
 
 def _bind_audit_user(current_user: Usuario | None) -> None:
+    """
+    Enlaza el usuario actual al contexto de auditoría.
+    """
     set_current_user_id(current_user.id if current_user else None)
 
 
 def _build_event_metadata(current_user: Usuario | None) -> dict:
+    """
+    Construye metadata estándar para eventos de dominio.
+    """
     return {
         "source": "api-jmv",
         "user_id": current_user.id if current_user else None,
@@ -103,6 +119,9 @@ def _publicar_evento_item_kafka(
     payload: dict,
     current_user: Usuario | None = None,
 ) -> None:
+    """
+    Publica un evento de dominio hacia Kafka.
+    """
     event = DomainEvent(
         event_type=event_type,
         aggregate_type="item",
@@ -115,14 +134,23 @@ def _publicar_evento_item_kafka(
 
 
 def _build_absolute_url(request: Request, route_name: str, **path_params: Any) -> str:
+    """
+    Construye una URL absoluta usando url_for.
+    """
     return str(request.url_for(route_name, **path_params))
 
 
 def _build_transferir_stock_url(request: Request) -> str:
+    """
+    Construye URL absoluta del endpoint de transferencia de stock.
+    """
     return _build_absolute_url(request, "transferir_stock")
 
 
 def build_links(item: Item, request: Request) -> dict[str, str]:
+    """
+    Construye links HATEOAS para un item.
+    """
     links: dict[str, str] = {
         "self": _build_absolute_url(request, "obtener_item_por_id", item_id=str(item.id)),
     }
@@ -142,16 +170,25 @@ def build_links(item: Item, request: Request) -> dict[str, str]:
 
 
 def _item_read_with_links(item: Item, request: Request) -> ItemRead:
+    """
+    Convierte entidad Item a ItemRead e inyecta links HATEOAS.
+    """
     payload = ItemRead.model_validate(item)
     payload.links = build_links(item, request)
     return payload
 
 
 def _items_read_with_links(items: list[Item], request: Request) -> list[ItemRead]:
+    """
+    Convierte lista de entidades Item a lista de ItemRead con links.
+    """
     return [_item_read_with_links(item, request) for item in items]
 
 
 def _build_page_url(request: Request, query_params: dict[str, Any], page: int) -> str:
+    """
+    Construye URL de paginación preservando query params.
+    """
     params = {
         key: value
         for key, value in query_params.items()
@@ -169,6 +206,9 @@ def build_pagination_links(
     total: int,
     query_params: dict[str, Any],
 ) -> dict[str, str | None]:
+    """
+    Construye links first / prev / next / last para paginación.
+    """
     last_page = max(1, ceil(total / page_size)) if page_size > 0 else 1
 
     first_link = None if page <= 1 else _build_page_url(request, query_params, 1)
@@ -199,15 +239,23 @@ def crear_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
+    """
+    Crea un item legacy e instrumenta métricas:
+    - create
+    - items creados por categoría
+    - latencia DB
+    """
     _bind_audit_user(current_user)
 
     categoria = None
     if payload.categoria_id is not None:
-        categoria = db.execute(
-            select(Categoria).where(Categoria.id == payload.categoria_id)
-        ).scalars().first()
+        with measure_db_query("select", "categorias"):
+            categoria = db.execute(
+                select(Categoria).where(Categoria.id == payload.categoria_id)
+            ).scalars().first()
 
         if not categoria:
+            increment_crud_operation("item", "create", "error")
             return error_response(
                 status_code=400,
                 message=f"La categoría con id={payload.categoria_id} no existe",
@@ -223,43 +271,50 @@ def crear_item(
         categoria_id=payload.categoria_id,
     )
 
-    item = repo.create(item)
+    try:
+        with measure_db_query("insert", "items"):
+            item = repo.create(item)
 
-    category_name = categoria.nombre if categoria else "sin_categoria"
-    ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
-    sync_active_items_gauge(db)
+        category_name = categoria.nombre if categoria else "sin_categoria"
+        ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
+        sync_active_items_gauge(db)
+        increment_crud_operation("item", "create", "success")
 
-    invalidate_first_page_list_caches()
+        invalidate_first_page_list_caches()
 
-    if settings.CELERY_ENABLED:
-        try:
-            enviar_notificacion.delay(item.id, "admin@empresa.com")
-        except Exception as exc:
-            logger.warning(
-                "No se pudo encolar tarea Celery enviar_notificacion: %s",
-                exc,
-            )
+        if settings.CELERY_ENABLED:
+            try:
+                enviar_notificacion.delay(item.id, "admin@empresa.com")
+            except Exception as exc:
+                logger.warning(
+                    "No se pudo encolar tarea Celery enviar_notificacion: %s",
+                    exc,
+                )
 
-    _publicar_evento_item(
-        "items.creado",
-        ItemRead.model_validate(item).model_dump(mode="json"),
-    )
+        _publicar_evento_item(
+            "items.creado",
+            ItemRead.model_validate(item).model_dump(mode="json"),
+        )
 
-    _publicar_evento_item_kafka(
-        event_type="item.created",
-        aggregate_id=item.id,
-        payload=ItemRead.model_validate(item).model_dump(mode="json"),
-        current_user=current_user,
-    )
+        _publicar_evento_item_kafka(
+            event_type="item.created",
+            aggregate_id=item.id,
+            payload=ItemRead.model_validate(item).model_dump(mode="json"),
+            current_user=current_user,
+        )
 
-    logger.info(f"Item creado: id={item.id}, nombre={item.name}")
+        logger.info(f"Item creado: id={item.id}, nombre={item.name}")
 
-    return ApiResponse[ItemRead](
-        success=True,
-        message="Item creado exitosamente",
-        data=_item_read_with_links(item, request),
-        metadata={},
-    )
+        return ApiResponse[ItemRead](
+            success=True,
+            message="Item creado exitosamente",
+            data=_item_read_with_links(item, request),
+            metadata={},
+        )
+
+    except Exception:
+        increment_crud_operation("item", "create", "error")
+        raise
 
 
 @router.post(
@@ -275,6 +330,9 @@ def bulk_create_items(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
+    """
+    Crea items en lote e instrumenta métricas de bulk create.
+    """
     _bind_audit_user(current_user)
 
     try:
@@ -283,19 +341,21 @@ def bulk_create_items(
         categorias_map: dict[int, Categoria] = {}
 
         if categorias_ids:
-            categorias = (
-                db.execute(
-                    select(Categoria).where(Categoria.id.in_(categorias_ids))
+            with measure_db_query("select", "categorias"):
+                categorias = (
+                    db.execute(
+                        select(Categoria).where(Categoria.id.in_(categorias_ids))
+                    )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
             categorias_map = {categoria.id: categoria for categoria in categorias}
 
         for it in payload.items:
             categoria_id = getattr(it, "categoria_id", None)
 
             if categoria_id is not None and categoria_id not in categorias_map:
+                increment_crud_operation("item", "bulk_create", "error")
                 return error_response(
                     status_code=400,
                     message=f"La categoría con id={categoria_id} no existe",
@@ -313,11 +373,13 @@ def bulk_create_items(
                 )
             )
 
-        db.add_all(objects)
-        db.commit()
+        with measure_db_query("insert", "items"):
+            db.add_all(objects)
+            db.commit()
 
-        for obj in objects:
-            db.refresh(obj)
+        with measure_db_query("select", "items"):
+            for obj in objects:
+                db.refresh(obj)
 
         for it in payload.items:
             categoria_id = getattr(it, "categoria_id", None)
@@ -329,6 +391,7 @@ def bulk_create_items(
             ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
 
         sync_active_items_gauge(db)
+        increment_crud_operation("item", "bulk_create", "success")
         invalidate_first_page_list_caches()
 
         logger.info(f"Bulk create completado: total_items={len(objects)}")
@@ -342,6 +405,7 @@ def bulk_create_items(
 
     except IntegrityError as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_create", "error")
         logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=400,
@@ -349,6 +413,7 @@ def bulk_create_items(
         )
     except SQLAlchemyError as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_create", "error")
         logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -357,6 +422,7 @@ def bulk_create_items(
         )
     except Exception as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_create", "error")
         logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -375,11 +441,16 @@ def bulk_delete_items(
     payload: BulkDelete,
     db: Session = Depends(get_db),
 ):
+    """
+    Elimina items en lote (soft delete) e instrumenta métricas de bulk delete.
+    """
     try:
         now = datetime.now()
 
-        stmt = select(Item).where(Item.id.in_(payload.ids))
-        found = db.execute(stmt).scalars().all()
+        with measure_db_query("select", "items"):
+            stmt = select(Item).where(Item.id.in_(payload.ids))
+            found = db.execute(stmt).scalars().all()
+
         found_map = {i.id: i for i in found}
 
         deleted = 0
@@ -399,9 +470,11 @@ def bulk_delete_items(
                 deleted += 1
                 affected_ids.append(item.id)
 
-        db.commit()
+        with measure_db_query("update", "items"):
+            db.commit()
 
         sync_active_items_gauge(db)
+        increment_crud_operation("item", "bulk_delete", "success")
 
         for item_id in affected_ids:
             delete_cache(build_item_cache_key(item_id))
@@ -420,6 +493,7 @@ def bulk_delete_items(
 
     except SQLAlchemyError as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_delete", "error")
         logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -428,6 +502,7 @@ def bulk_delete_items(
         )
     except Exception as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_delete", "error")
         logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -446,9 +521,14 @@ def bulk_update_disponible(
     payload: BulkUpdateDisponible,
     db: Session = Depends(get_db),
 ):
+    """
+    Actualiza disponibilidad en lote e instrumenta métricas de bulk update.
+    """
     try:
-        stmt = select(Item).where(Item.id.in_(payload.ids))
-        found = db.execute(stmt).scalars().all()
+        with measure_db_query("select", "items"):
+            stmt = select(Item).where(Item.id.in_(payload.ids))
+            found = db.execute(stmt).scalars().all()
+
         found_map = {i.id: i for i in found}
 
         updated = 0
@@ -464,6 +544,7 @@ def bulk_update_disponible(
 
             if payload.disponible:
                 if item.stock == 0:
+                    increment_crud_operation("item", "bulk_update_disponible", "error")
                     raise StockInsuficienteError(item_id=item.id, stock_actual=item.stock)
             else:
                 if item.stock != 0:
@@ -482,7 +563,10 @@ def bulk_update_disponible(
                     updated += 1
                     affected_ids.append(item.id)
 
-        db.commit()
+        with measure_db_query("update", "items"):
+            db.commit()
+
+        increment_crud_operation("item", "bulk_update_disponible", "success")
 
         for item_id in set(affected_ids):
             delete_cache(build_item_cache_key(item_id))
@@ -505,6 +589,7 @@ def bulk_update_disponible(
         raise
     except SQLAlchemyError as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_update_disponible", "error")
         logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -513,6 +598,7 @@ def bulk_update_disponible(
         )
     except Exception as e:
         db.rollback()
+        increment_crud_operation("item", "bulk_update_disponible", "error")
         logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
         return error_response(
             status_code=500,
@@ -551,6 +637,9 @@ async def listar_items(
     db: AsyncSession = Depends(get_db_async),
     _ip: str = Depends(log_client_ip),
 ):
+    """
+    Lista items e instrumenta métricas de lectura y latencia DB.
+    """
     cache_params = {
         "page_size": page_size,
         "nombre": nombre,
@@ -579,6 +668,7 @@ async def listar_items(
     cached_page = get_cache(cache_key)
     if cached_page is not None:
         response.headers["X-Cache"] = "HIT"
+        increment_crud_operation("item", "list", "success")
         return cached_page
 
     stmt = (
@@ -618,70 +708,79 @@ async def listar_items(
         stmt = stmt.where(Item.created_at >= dt)
         count_base_stmt = count_base_stmt.where(Item.created_at >= dt)
 
-    count_stmt = select(func.count()).select_from(count_base_stmt.subquery())
-    total_result = await db.execute(count_stmt)
-    total = total_result.scalar_one()
+    try:
+        count_stmt = select(func.count()).select_from(count_base_stmt.subquery())
 
-    order_map = {
-        "precio_asc": Item.price.asc(),
-        "precio_desc": Item.price.desc(),
-        "nombre_asc": Item.name.asc(),
-        "nombre_desc": Item.name.desc(),
-    }
-    stmt = stmt.order_by(order_map[ordenar_por]) if ordenar_por else stmt.order_by(Item.id.asc())
+        async with measure_db_query_async("select", "items"):
+            total_result = await db.execute(count_stmt)
+            total = total_result.scalar_one()
 
-    offset = (page - 1) * page_size
-    stmt = stmt.offset(offset).limit(page_size)
+        order_map = {
+            "precio_asc": Item.price.asc(),
+            "precio_desc": Item.price.desc(),
+            "nombre_asc": Item.name.asc(),
+            "nombre_desc": Item.name.desc(),
+        }
+        stmt = stmt.order_by(order_map[ordenar_por]) if ordenar_por else stmt.order_by(Item.id.asc())
 
-    result = await db.execute(stmt)
-    items = result.scalars().all()
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size)
 
-    paginated = PaginatedResponse[ItemRead](
-        page=page,
-        page_size=page_size,
-        total=total,
-        items=_items_read_with_links(list(items), request),
-    )
+        async with measure_db_query_async("select", "items"):
+            result = await db.execute(stmt)
+            items = result.scalars().all()
 
-    pagination_links = build_pagination_links(
-        request=request,
-        page=page,
-        page_size=page_size,
-        total=total,
-        query_params=query_params,
-    )
+        paginated = PaginatedResponse[ItemRead](
+            page=page,
+            page_size=page_size,
+            total=total,
+            items=_items_read_with_links(list(items), request),
+        )
 
-    payload = ApiResponse[PaginatedResponse[ItemRead]](
-        success=True,
-        message="Items obtenidos exitosamente",
-        data=paginated,
-        metadata={
-            "_links": pagination_links,
-            "hateoas": {
-                "absolute_urls": True,
-                "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+        pagination_links = build_pagination_links(
+            request=request,
+            page=page,
+            page_size=page_size,
+            total=total,
+            query_params=query_params,
+        )
+
+        payload = ApiResponse[PaginatedResponse[ItemRead]](
+            success=True,
+            message="Items obtenidos exitosamente",
+            data=paginated,
+            metadata={
+                "_links": pagination_links,
+                "hateoas": {
+                    "absolute_urls": True,
+                    "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+                },
             },
-        },
-    )
+        )
 
-    payload_dict = payload.model_dump(mode="json", by_alias=True)
+        payload_dict = payload.model_dump(mode="json", by_alias=True)
 
-    set_cache(
-        cache_key,
-        payload_dict,
-        ttl=settings.CACHE_TTL_LIST_SECONDS,
-    )
+        set_cache(
+            cache_key,
+            payload_dict,
+            ttl=settings.CACHE_TTL_LIST_SECONDS,
+        )
 
-    register_list_cache(
-        cache_key=cache_key,
-        page=page,
-        ttl=settings.CACHE_TTL_LIST_SECONDS,
-        item_ids=[item.id for item in items],
-        params=cache_params,
-    )
+        register_list_cache(
+            cache_key=cache_key,
+            page=page,
+            ttl=settings.CACHE_TTL_LIST_SECONDS,
+            item_ids=[item.id for item in items],
+            params=cache_params,
+        )
 
-    response.headers["X-Cache"] = "MISS"
-    return payload
+        response.headers["X-Cache"] = "MISS"
+        increment_crud_operation("item", "list", "success")
+        return payload
+
+    except Exception:
+        increment_crud_operation("item", "list", "error")
+        raise
 
 
 @router.get(
@@ -696,19 +795,29 @@ def buscar_items(
     nombre: str = Query(..., min_length=1, description="Nombre exacto del item"),
     db: Session = Depends(get_db),
 ):
-    items = (
-        db.query(Item)
-        .filter(Item.name == nombre, Item.eliminado.is_(False))
-        .order_by(Item.id.asc())
-        .all()
-    )
+    """
+    Busca items por nombre exacto e instrumenta lectura y latencia DB.
+    """
+    try:
+        with measure_db_query("select", "items"):
+            items = (
+                db.query(Item)
+                .filter(Item.name == nombre, Item.eliminado.is_(False))
+                .order_by(Item.id.asc())
+                .all()
+            )
 
-    return ApiResponse[list[ItemRead]](
-        success=True,
-        message="Búsqueda segura ejecutada",
-        data=_items_read_with_links(items, request),
-        metadata={},
-    )
+        increment_crud_operation("item", "search", "success")
+
+        return ApiResponse[list[ItemRead]](
+            success=True,
+            message="Búsqueda segura ejecutada",
+            data=_items_read_with_links(items, request),
+            metadata={},
+        )
+    except Exception:
+        increment_crud_operation("item", "search", "error")
+        raise
 
 
 @router.get(
@@ -723,32 +832,42 @@ def listar_items_cursor(
     limite: int = Query(10, ge=1, le=100, description="Cantidad máxima de items por página"),
     db: Session = Depends(get_db),
 ):
-    stmt = (
-        select(Item)
-        .where(Item.eliminado == False)  # noqa: E712
-        .where(Item.id > cursor)
-        .order_by(Item.id.asc())
-        .limit(limite + 1)
-    )
+    """
+    Lista items con cursor e instrumenta lectura y latencia DB.
+    """
+    try:
+        stmt = (
+            select(Item)
+            .where(Item.eliminado == False)  # noqa: E712
+            .where(Item.id > cursor)
+            .order_by(Item.id.asc())
+            .limit(limite + 1)
+        )
 
-    results = db.execute(stmt).scalars().all()
+        with measure_db_query("select", "items"):
+            results = db.execute(stmt).scalars().all()
 
-    has_more = len(results) > limite
-    items = results[:limite]
-    next_cursor = items[-1].id if items else None
+        has_more = len(results) > limite
+        items = results[:limite]
+        next_cursor = items[-1].id if items else None
 
-    data = CursorPaginationResponse(
-        items=[item.model_dump(by_alias=True) for item in _items_read_with_links(items, request)],
-        next_cursor=next_cursor,
-        has_more=has_more,
-    )
+        data = CursorPaginationResponse(
+            items=[item.model_dump(by_alias=True) for item in _items_read_with_links(items, request)],
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
 
-    return ApiResponse[CursorPaginationResponse](
-        success=True,
-        message="Items obtenidos exitosamente con paginación por cursor",
-        data=data,
-        metadata={},
-    )
+        increment_crud_operation("item", "cursor_list", "success")
+
+        return ApiResponse[CursorPaginationResponse](
+            success=True,
+            message="Items obtenidos exitosamente con paginación por cursor",
+            data=data,
+            metadata={},
+        )
+    except Exception:
+        increment_crud_operation("item", "cursor_list", "error")
+        raise
 
 
 @router.get(
@@ -764,46 +883,57 @@ def listar_eliminados(
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
     db: Session = Depends(get_db),
 ):
-    stmt = select(Item).where(Item.eliminado == True)  # noqa: E712
+    """
+    Lista items eliminados e instrumenta lectura y latencia DB.
+    """
+    try:
+        stmt = select(Item).where(Item.eliminado == True)  # noqa: E712
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = db.execute(count_stmt).scalar_one()
+        with measure_db_query("select", "items"):
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            total = db.execute(count_stmt).scalar_one()
 
-    stmt = stmt.order_by(Item.id.asc())
+        stmt = stmt.order_by(Item.id.asc())
 
-    offset = (page - 1) * page_size
-    stmt = stmt.offset(offset).limit(page_size)
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size)
 
-    items = db.execute(stmt).scalars().all()
+        with measure_db_query("select", "items"):
+            items = db.execute(stmt).scalars().all()
 
-    query_params = {"page_size": page_size}
-    pagination_links = build_pagination_links(
-        request=request,
-        page=page,
-        page_size=page_size,
-        total=total,
-        query_params=query_params,
-    )
+        query_params = {"page_size": page_size}
+        pagination_links = build_pagination_links(
+            request=request,
+            page=page,
+            page_size=page_size,
+            total=total,
+            query_params=query_params,
+        )
 
-    paginated = PaginatedResponse[ItemRead](
-        page=page,
-        page_size=page_size,
-        total=total,
-        items=_items_read_with_links(items, request),
-    )
+        paginated = PaginatedResponse[ItemRead](
+            page=page,
+            page_size=page_size,
+            total=total,
+            items=_items_read_with_links(items, request),
+        )
 
-    return ApiResponse[PaginatedResponse[ItemRead]](
-        success=True,
-        message="Items eliminados obtenidos exitosamente",
-        data=paginated,
-        metadata={
-            "_links": pagination_links,
-            "hateoas": {
-                "absolute_urls": True,
-                "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+        increment_crud_operation("item", "list_deleted", "success")
+
+        return ApiResponse[PaginatedResponse[ItemRead]](
+            success=True,
+            message="Items eliminados obtenidos exitosamente",
+            data=paginated,
+            metadata={
+                "_links": pagination_links,
+                "hateoas": {
+                    "absolute_urls": True,
+                    "usage": "El cliente debe seguir las URLs de _links sin construir rutas manualmente.",
+                },
             },
-        },
-    )
+        )
+    except Exception:
+        increment_crud_operation("item", "list_deleted", "error")
+        raise
 
 
 @router.get(
@@ -813,6 +943,9 @@ def listar_eliminados(
     dependencies=[Depends(verify_api_key)],
 )
 def mi_ip(ip: str = Depends(get_client_ip)):
+    """
+    Endpoint de demo para recuperar la IP del cliente.
+    """
     return ApiResponse[dict](
         success=True,
         message="IP obtenida exitosamente",
@@ -834,17 +967,23 @@ def obtener_item_por_id(
     response: Response,
     repo: ItemRepository = Depends(get_item_repo),
 ):
+    """
+    Obtiene un item por ID e instrumenta lectura y latencia DB.
+    """
     cache_key = build_item_cache_key(item_id)
 
     cached_item = get_cache(cache_key)
     if cached_item is not None:
         response.headers["X-Cache"] = "HIT"
+        increment_crud_operation("item", "read", "success")
         return cached_item
 
-    item = repo.get_by_id(item_id)
+    with measure_db_query("select", "items"):
+        item = repo.get_by_id(item_id)
 
     if not item:
         response.headers["X-Cache"] = "MISS"
+        increment_crud_operation("item", "read", "error")
         raise ItemNoEncontradoError(item_id)
 
     payload = ApiResponse[ItemRead](
@@ -861,6 +1000,7 @@ def obtener_item_por_id(
     )
 
     response.headers["X-Cache"] = "MISS"
+    increment_crud_operation("item", "read", "success")
     return payload
 
 
@@ -879,23 +1019,31 @@ def actualizar_item(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
+    """
+    Actualiza un item e instrumenta update y latencia DB.
+    """
     _bind_audit_user(current_user)
 
-    item = repo.get_by_id(item_id)
+    with measure_db_query("select", "items"):
+        item = repo.get_by_id(item_id)
+
     if not item:
+        increment_crud_operation("item", "update", "error")
         raise ItemNoEncontradoError(item_id)
 
     categoria = None
     if payload.categoria_id is not None:
-        categoria = (
-            db.execute(
-                select(Categoria).where(Categoria.id == payload.categoria_id)
+        with measure_db_query("select", "categorias"):
+            categoria = (
+                db.execute(
+                    select(Categoria).where(Categoria.id == payload.categoria_id)
+                )
+                .scalars()
+                .first()
             )
-            .scalars()
-            .first()
-        )
 
         if not categoria:
+            increment_crud_operation("item", "update", "error")
             return error_response(
                 status_code=400,
                 message=f"La categoría con id={payload.categoria_id} no existe",
@@ -909,35 +1057,41 @@ def actualizar_item(
     item.stock = payload.stock
     item.categoria_id = payload.categoria_id
 
-    item = repo.update(item)
+    try:
+        with measure_db_query("update", "items"):
+            item = repo.update(item)
 
-    sync_active_items_gauge(repo.db)
+        sync_active_items_gauge(repo.db)
+        increment_crud_operation("item", "update", "success")
 
-    delete_cache(build_item_cache_key(item_id))
-    invalidate_list_caches_for_item(item_id, include_first_pages=True)
+        delete_cache(build_item_cache_key(item_id))
+        invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    _publicar_evento_item(
-        "items.actualizado",
-        ItemRead.model_validate(item).model_dump(mode="json"),
-    )
+        _publicar_evento_item(
+            "items.actualizado",
+            ItemRead.model_validate(item).model_dump(mode="json"),
+        )
 
-    _publicar_evento_item_kafka(
-        event_type="item.updated",
-        aggregate_id=item.id,
-        payload=ItemRead.model_validate(item).model_dump(mode="json"),
-        current_user=current_user,
-    )
+        _publicar_evento_item_kafka(
+            event_type="item.updated",
+            aggregate_id=item.id,
+            payload=ItemRead.model_validate(item).model_dump(mode="json"),
+            current_user=current_user,
+        )
 
-    logger.info(
-        f"Item actualizado: id={item.id}, usuario={current_user.email}"
-    )
+        logger.info(
+            f"Item actualizado: id={item.id}, usuario={current_user.email}"
+        )
 
-    return ApiResponse[ItemRead](
-        success=True,
-        message="Item actualizado exitosamente",
-        data=_item_read_with_links(item, request),
-        metadata={},
-    )
+        return ApiResponse[ItemRead](
+            success=True,
+            message="Item actualizado exitosamente",
+            data=_item_read_with_links(item, request),
+            metadata={},
+        )
+    except Exception:
+        increment_crud_operation("item", "update", "error")
+        raise
 
 
 @router.get(
@@ -950,36 +1104,46 @@ def obtener_historial_item(
     item_id: int,
     db: Session = Depends(get_db),
 ):
-    auditorias = (
-        db.execute(
-            select(AuditoriaItem)
-            .where(AuditoriaItem.item_id == item_id)
-            .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+    """
+    Obtiene historial de auditoría e instrumenta lectura.
+    """
+    try:
+        with measure_db_query("select", "auditoria_item"):
+            auditorias = (
+                db.execute(
+                    select(AuditoriaItem)
+                    .where(AuditoriaItem.item_id == item_id)
+                    .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+
+        data = [
+            {
+                "id": audit.id,
+                "item_id": audit.item_id,
+                "accion": audit.accion,
+                "datos_anteriores": audit.datos_anteriores,
+                "datos_nuevos": audit.datos_nuevos,
+                "usuario_id": audit.usuario_id,
+                "timestamp": audit.timestamp.isoformat() if audit.timestamp else None,
+                "ip_cliente": audit.ip_cliente,
+            }
+            for audit in auditorias
+        ]
+
+        increment_crud_operation("item", "history", "success")
+
+        return ApiResponse[list[dict]](
+            success=True,
+            message="Historial de auditoría obtenido exitosamente",
+            data=data,
+            metadata={},
         )
-        .scalars()
-        .all()
-    )
-
-    data = [
-        {
-            "id": audit.id,
-            "item_id": audit.item_id,
-            "accion": audit.accion,
-            "datos_anteriores": audit.datos_anteriores,
-            "datos_nuevos": audit.datos_nuevos,
-            "usuario_id": audit.usuario_id,
-            "timestamp": audit.timestamp.isoformat() if audit.timestamp else None,
-            "ip_cliente": audit.ip_cliente,
-        }
-        for audit in auditorias
-    ]
-
-    return ApiResponse[list[dict]](
-        success=True,
-        message="Historial de auditoría obtenido exitosamente",
-        data=data,
-        metadata={},
-    )
+    except Exception:
+        increment_crud_operation("item", "history", "error")
+        raise
 
 
 @router.get(
@@ -993,41 +1157,51 @@ def obtener_estado_item_en_fecha(
     fecha: datetime = Query(..., description="Fecha y hora en formato ISO 8601"),
     db: Session = Depends(get_db),
 ):
-    auditorias = (
-        db.execute(
-            select(AuditoriaItem)
-            .where(AuditoriaItem.item_id == item_id)
-            .where(AuditoriaItem.timestamp <= fecha)
-            .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+    """
+    Reconstruye el estado de un item en una fecha dada.
+    """
+    try:
+        with measure_db_query("select", "auditoria_item"):
+            auditorias = (
+                db.execute(
+                    select(AuditoriaItem)
+                    .where(AuditoriaItem.item_id == item_id)
+                    .where(AuditoriaItem.timestamp <= fecha)
+                    .order_by(AuditoriaItem.timestamp.asc(), AuditoriaItem.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+
+        estado: dict | None = None
+
+        for audit in auditorias:
+            if audit.accion == "CREATE":
+                estado = audit.datos_nuevos.copy() if audit.datos_nuevos else None
+            elif audit.accion == "UPDATE":
+                estado = audit.datos_nuevos.copy() if audit.datos_nuevos else estado
+            elif audit.accion == "DELETE":
+                if audit.datos_nuevos is None:
+                    estado = None
+                else:
+                    estado = audit.datos_nuevos.copy()
+
+        increment_crud_operation("item", "state_at_date", "success")
+
+        return ApiResponse[dict](
+            success=True,
+            message="Estado reconstruido exitosamente",
+            data={
+                "item_id": item_id,
+                "fecha_consulta": fecha.isoformat(),
+                "exists_at_that_time": estado is not None,
+                "estado": estado,
+            },
+            metadata={},
         )
-        .scalars()
-        .all()
-    )
-
-    estado: dict | None = None
-
-    for audit in auditorias:
-        if audit.accion == "CREATE":
-            estado = audit.datos_nuevos.copy() if audit.datos_nuevos else None
-        elif audit.accion == "UPDATE":
-            estado = audit.datos_nuevos.copy() if audit.datos_nuevos else estado
-        elif audit.accion == "DELETE":
-            if audit.datos_nuevos is None:
-                estado = None
-            else:
-                estado = audit.datos_nuevos.copy()
-
-    return ApiResponse[dict](
-        success=True,
-        message="Estado reconstruido exitosamente",
-        data={
-            "item_id": item_id,
-            "fecha_consulta": fecha.isoformat(),
-            "exists_at_that_time": estado is not None,
-            "estado": estado,
-        },
-        metadata={},
-    )
+    except Exception:
+        increment_crud_operation("item", "state_at_date", "error")
+        raise
 
 
 @router.delete(
@@ -1041,17 +1215,23 @@ def eliminar_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin")),
 ):
+    """
+    Elimina lógicamente un item e instrumenta delete y latencia DB.
+    """
     _bind_audit_user(current_user)
 
-    item = repo.get_by_id(item_id)
+    with measure_db_query("select", "items"):
+        item = repo.get_by_id(item_id)
 
     if not item:
+        increment_crud_operation("item", "delete", "error")
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
         logger.warning(
             f"Intento de eliminar un item ya eliminado: id={item.id}, usuario={current_user.email}"
         )
+        increment_crud_operation("item", "delete", "success")
         return ApiResponse[dict](
             success=True,
             message="Item ya estaba eliminado",
@@ -1059,47 +1239,53 @@ def eliminar_item(
             metadata={},
         )
 
-    repo.delete(item)
+    try:
+        with measure_db_query("update", "items"):
+            repo.delete(item)
 
-    sync_active_items_gauge(repo.db)
+        sync_active_items_gauge(repo.db)
+        increment_crud_operation("item", "delete", "success")
 
-    delete_cache(build_item_cache_key(item_id))
-    invalidate_list_caches_for_item(item_id, include_first_pages=True)
+        delete_cache(build_item_cache_key(item_id))
+        invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    _publicar_evento_item(
-        "items.eliminado",
-        {
-            "id": item.id,
-            "name": item.name,
-            "sku": item.sku,
-            "codigo_sku": item.codigo_sku,
-            "eliminado": True,
-        },
-    )
+        _publicar_evento_item(
+            "items.eliminado",
+            {
+                "id": item.id,
+                "name": item.name,
+                "sku": item.sku,
+                "codigo_sku": item.codigo_sku,
+                "eliminado": True,
+            },
+        )
 
-    _publicar_evento_item_kafka(
-        event_type="item.deleted",
-        aggregate_id=item.id,
-        payload={
-            "id": item.id,
-            "name": item.name,
-            "sku": item.sku,
-            "codigo_sku": item.codigo_sku,
-            "eliminado": True,
-        },
-        current_user=current_user,
-    )
+        _publicar_evento_item_kafka(
+            event_type="item.deleted",
+            aggregate_id=item.id,
+            payload={
+                "id": item.id,
+                "name": item.name,
+                "sku": item.sku,
+                "codigo_sku": item.codigo_sku,
+                "eliminado": True,
+            },
+            current_user=current_user,
+        )
 
-    logger.info(
-        f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"
-    )
+        logger.info(
+            f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"
+        )
 
-    return ApiResponse[dict](
-        success=True,
-        message="Item eliminado (soft delete)",
-        data={"ok": True},
-        metadata={},
-    )
+        return ApiResponse[dict](
+            success=True,
+            message="Item eliminado (soft delete)",
+            data={"ok": True},
+            metadata={},
+        )
+    except Exception:
+        increment_crud_operation("item", "delete", "error")
+        raise
 
 
 @router.post(
@@ -1115,40 +1301,53 @@ def restaurar_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
+    """
+    Restaura un item eliminado e instrumenta restore y latencia DB.
+    """
     _bind_audit_user(current_user)
 
-    item = repo.get_by_id(item_id)
+    with measure_db_query("select", "items"):
+        item = repo.get_by_id(item_id)
 
     if not item:
+        increment_crud_operation("item", "restore", "error")
         raise ItemNoEncontradoError(item_id)
 
     if not item.eliminado:
+        increment_crud_operation("item", "restore", "error")
         return error_response(status_code=400, message="El item no está eliminado")
 
     item.eliminado = False
     item.eliminado_en = None
-    item = repo.update(item)
 
-    sync_active_items_gauge(repo.db)
+    try:
+        with measure_db_query("update", "items"):
+            item = repo.update(item)
 
-    delete_cache(build_item_cache_key(item_id))
-    invalidate_list_caches_for_item(item_id, include_first_pages=True)
+        sync_active_items_gauge(repo.db)
+        increment_crud_operation("item", "restore", "success")
 
-    _publicar_evento_item_kafka(
-        event_type="item.restored",
-        aggregate_id=item.id,
-        payload=ItemRead.model_validate(item).model_dump(mode="json"),
-        current_user=current_user,
-    )
+        delete_cache(build_item_cache_key(item_id))
+        invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-    logger.info(f"Item restaurado: id={item.id}")
+        _publicar_evento_item_kafka(
+            event_type="item.restored",
+            aggregate_id=item.id,
+            payload=ItemRead.model_validate(item).model_dump(mode="json"),
+            current_user=current_user,
+        )
 
-    return ApiResponse[ItemRead](
-        success=True,
-        message="Item restaurado exitosamente",
-        data=_item_read_with_links(item, request),
-        metadata={},
-    )
+        logger.info(f"Item restaurado: id={item.id}")
+
+        return ApiResponse[ItemRead](
+            success=True,
+            message="Item restaurado exitosamente",
+            data=_item_read_with_links(item, request),
+            metadata={},
+        )
+    except Exception:
+        increment_crud_operation("item", "restore", "error")
+        raise
 
 
 @router.post(
@@ -1161,78 +1360,96 @@ def transferir_stock(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
+    """
+    Transfiere stock entre items e instrumenta operación y latencia DB.
+    """
     _bind_audit_user(current_user)
 
     if payload.item_origen_id == payload.item_destino_id:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El item origen y destino no pueden ser el mismo",
         )
 
-    item_origen = repo.get_by_id(payload.item_origen_id)
+    with measure_db_query("select", "items"):
+        item_origen = repo.get_by_id(payload.item_origen_id)
+
     if item_origen is None:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item origen no encontrado",
         )
 
-    item_destino = repo.get_by_id(payload.item_destino_id)
+    with measure_db_query("select", "items"):
+        item_destino = repo.get_by_id(payload.item_destino_id)
+
     if item_destino is None:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item destino no encontrado",
         )
 
     if item_origen.eliminado:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El item origen está eliminado",
         )
 
     if item_destino.eliminado:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El item destino está eliminado",
         )
 
     if item_origen.stock < payload.cantidad:
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stock insuficiente en el item origen",
         )
 
     try:
-        with db.begin_nested():
-            item_origen.stock -= payload.cantidad
+        with measure_db_query("update", "items"):
+            with db.begin_nested():
+                item_origen.stock -= payload.cantidad
 
-            if payload.forzar_error:
-                raise RuntimeError("Error forzado para probar rollback")
+                if payload.forzar_error:
+                    raise RuntimeError("Error forzado para probar rollback")
 
-            item_destino.stock += payload.cantidad
+                item_destino.stock += payload.cantidad
 
-            movimiento = MovimientoStock(
-                item_origen_id=item_origen.id,
-                item_destino_id=item_destino.id,
-                cantidad=payload.cantidad,
-                usuario=payload.usuario,
-            )
-            db.add(movimiento)
+                movimiento = MovimientoStock(
+                    item_origen_id=item_origen.id,
+                    item_destino_id=item_destino.id,
+                    cantidad=payload.cantidad,
+                    usuario=payload.usuario,
+                )
+                db.add(movimiento)
 
-        db.commit()
+            db.commit()
+
+        with measure_db_query("select", "items"):
+            db.refresh(item_origen)
+            db.refresh(item_destino)
 
     except Exception as exc:
         db.rollback()
+        increment_crud_operation("item", "stock_transfer", "error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al transferir stock: {exc}",
         ) from exc
 
-    db.refresh(item_origen)
-    db.refresh(item_destino)
-
     for affected_id in (item_origen.id, item_destino.id):
         delete_cache(build_item_cache_key(affected_id))
         invalidate_list_caches_for_item(affected_id, include_first_pages=True)
+
+    increment_crud_operation("item", "stock_transfer", "success")
 
     _publicar_evento_item_kafka(
         event_type="item.stock_transferred",

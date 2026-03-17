@@ -70,7 +70,10 @@ from app.middlewares.elk_logging import ELKLoggingMiddleware
 # SERVICES
 # -----------------------------------------------------
 
-from app.services.metrics_service import sync_active_items_gauge
+from app.services.metrics_service import (
+    sync_active_items_gauge,
+    sync_active_users_gauge,
+)
 
 
 # =====================================================
@@ -150,6 +153,7 @@ def create_app() -> FastAPI:
     db = SessionLocal()
     try:
         sync_active_items_gauge(db)
+        sync_active_users_gauge(db)
     finally:
         db.close()
 
@@ -223,7 +227,7 @@ def create_app() -> FastAPI:
         )
 
     # =================================================
-    # HANDLER ITEM NO ENCONTRADO (FIX TEST)
+    # HANDLER ITEM NO ENCONTRADO
     # =================================================
 
     @app.exception_handler(ItemNoEncontradoError)
@@ -242,7 +246,7 @@ def create_app() -> FastAPI:
         )
 
     # =================================================
-    # HANDLER STOCK INSUFICIENTE (FIX TEST)
+    # HANDLER STOCK INSUFICIENTE
     # =================================================
 
     @app.exception_handler(StockInsuficienteError)
@@ -296,20 +300,11 @@ Policy: https://empresa.com/security-policy
     # =================================================
 
     app.include_router(health_router)
-
     app.include_router(categorias_router)
-
     app.include_router(version_router, prefix="/api")
-
     app.include_router(api_router_v1, prefix="/api/v1")
-
     app.include_router(api_router_v2, prefix="/api/v2")
-
     app.include_router(operaciones_router, prefix="/api/v1")
-
-    # -------------------------------------------------
-    # USUARIOS (GDPR / LFPDPPP)
-    # -------------------------------------------------
 
     app.include_router(
         usuarios_router,
