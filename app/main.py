@@ -63,6 +63,8 @@ from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
 from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
+from app.middlewares.trace_id import TraceIdMiddleware
+from app.middlewares.elk_logging import ELKLoggingMiddleware
 
 # -----------------------------------------------------
 # SERVICES
@@ -136,6 +138,8 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(SQLInjectionWarningMiddleware)
     app.add_middleware(SecurityAnomalyMiddleware)
+    app.add_middleware(TraceIdMiddleware)
+    app.add_middleware(ELKLoggingMiddleware)
 
     # =================================================
     # DB INIT

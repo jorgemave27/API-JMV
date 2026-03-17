@@ -1,10 +1,11 @@
 version: "3.9"
 
 services:
+  # =====================================================
+  # API PRINCIPAL
+  # =====================================================
+
   api:
-    # -----------------------------------------------------
-    # Servicio principal de FastAPI
-    # -----------------------------------------------------
     build:
       context: .
       dockerfile: Dockerfile
@@ -69,6 +70,13 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root
 
+      # -----------------------------------------------------
+      # ELK LOGGING
+      # -----------------------------------------------------
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5044
+      LOG_LEVEL: INFO
+
     depends_on:
       db:
         condition: service_healthy
@@ -80,16 +88,19 @@ services:
         condition: service_started
       vault:
         condition: service_started
+      logstash:
+        condition: service_started
 
     networks:
       - api_jmv_network
 
     restart: unless-stopped
 
+  # =====================================================
+  # PROJECTION CONSUMER CQRS
+  # =====================================================
+
   projection-consumer:
-    # -----------------------------------------------------
-    # Consumer CQRS
-    # -----------------------------------------------------
     build:
       context: .
       dockerfile: Dockerfile
@@ -101,7 +112,6 @@ services:
 
     environment:
       APP_ENV: production
-
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
 
       API_KEY: dev-secret-key-change-me
@@ -118,9 +128,6 @@ services:
       KAFKA_CLIENT_ID: api-jmv-projection-consumer
       KAFKA_EVENTS_TOPIC: jmv.domain-events
 
-      # -----------------------------------------------------
-      # Consul
-      # -----------------------------------------------------
       CONSUL_ENABLED: "false"
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
@@ -132,6 +139,14 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root
 
+      # -----------------------------------------------------
+      # ELK LOGGING
+      # -----------------------------------------------------
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5044
+      LOG_LEVEL: INFO
+      SERVICE_NAME: api-jmv-projection-consumer
+
     depends_on:
       db:
         condition: service_healthy
@@ -141,16 +156,19 @@ services:
         condition: service_started
       vault:
         condition: service_started
+      logstash:
+        condition: service_started
 
     networks:
       - api_jmv_network
 
     restart: unless-stopped
 
+  # =====================================================
+  # CELERY WORKER
+  # =====================================================
+
   celery-worker:
-    # -----------------------------------------------------
-    # Worker Celery para tareas asíncronas y rotación
-    # -----------------------------------------------------
     build:
       context: .
       dockerfile: Dockerfile
@@ -162,7 +180,6 @@ services:
 
     environment:
       APP_ENV: production
-
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
 
       API_KEY: dev-secret-key-change-me
@@ -174,15 +191,20 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
 
-      # -----------------------------------------------------
-      # Consul
-      # -----------------------------------------------------
       CONSUL_ENABLED: "false"
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
 
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root
+
+      # -----------------------------------------------------
+      # ELK LOGGING
+      # -----------------------------------------------------
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5044
+      LOG_LEVEL: INFO
+      SERVICE_NAME: api-jmv-celery-worker
 
     depends_on:
       redis:
@@ -191,16 +213,19 @@ services:
         condition: service_healthy
       vault:
         condition: service_started
+      logstash:
+        condition: service_started
 
     networks:
       - api_jmv_network
 
     restart: unless-stopped
 
+  # =====================================================
+  # CELERY BEAT
+  # =====================================================
+
   celery-beat:
-    # -----------------------------------------------------
-    # Beat Celery para agendar la rotación cada 24h
-    # -----------------------------------------------------
     build:
       context: .
       dockerfile: Dockerfile
@@ -212,7 +237,6 @@ services:
 
     environment:
       APP_ENV: production
-
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
 
       API_KEY: dev-secret-key-change-me
@@ -224,9 +248,6 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
 
-      # -----------------------------------------------------
-      # Consul
-      # -----------------------------------------------------
       CONSUL_ENABLED: "false"
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
@@ -234,10 +255,22 @@ services:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: root
 
+      # -----------------------------------------------------
+      # ELK LOGGING
+      # -----------------------------------------------------
+      LOGSTASH_HOST: logstash
+      LOGSTASH_PORT: 5044
+      LOG_LEVEL: INFO
+      SERVICE_NAME: api-jmv-celery-beat
+
     depends_on:
       redis:
         condition: service_healthy
+      db:
+        condition: service_healthy
       vault:
+        condition: service_started
+      logstash:
         condition: service_started
 
     networks:
@@ -245,12 +278,12 @@ services:
 
     restart: unless-stopped
 
-  db:
-    # -----------------------------------------------------
-    # PostgreSQL
-    # -----------------------------------------------------
-    image: postgres:15
+  # =====================================================
+  # POSTGRES
+  # =====================================================
 
+  db:
+    image: postgres:15
     container_name: api-jmv-db
 
     environment:
@@ -275,12 +308,12 @@ services:
 
     restart: unless-stopped
 
-  redis:
-    # -----------------------------------------------------
-    # Redis
-    # -----------------------------------------------------
-    image: redis:7-alpine
+  # =====================================================
+  # REDIS
+  # =====================================================
 
+  redis:
+    image: redis:7-alpine
     container_name: api-jmv-redis
 
     ports:
@@ -300,12 +333,12 @@ services:
 
     restart: unless-stopped
 
-  gateway:
-    # -----------------------------------------------------
-    # API Gateway (NGINX)
-    # -----------------------------------------------------
-    image: nginx:alpine
+  # =====================================================
+  # GATEWAY (NGINX)
+  # =====================================================
 
+  gateway:
+    image: nginx:alpine
     container_name: api-jmv-gateway
 
     ports:
@@ -322,12 +355,12 @@ services:
 
     restart: unless-stopped
 
-  rabbitmq:
-    # -----------------------------------------------------
-    # RabbitMQ
-    # -----------------------------------------------------
-    image: rabbitmq:3-management
+  # =====================================================
+  # RABBITMQ
+  # =====================================================
 
+  rabbitmq:
+    image: rabbitmq:3-management
     container_name: api-jmv-rabbitmq
 
     ports:
@@ -343,12 +376,12 @@ services:
 
     restart: unless-stopped
 
-  kafka:
-    # -----------------------------------------------------
-    # Apache Kafka
-    # -----------------------------------------------------
-    image: apache/kafka:3.9.2
+  # =====================================================
+  # KAFKA
+  # =====================================================
 
+  kafka:
+    image: apache/kafka:3.9.2
     container_name: api-jmv-kafka
 
     ports:
@@ -376,12 +409,12 @@ services:
 
     restart: unless-stopped
 
-  consul:
-    # -----------------------------------------------------
-    # Consul Service Discovery
-    # -----------------------------------------------------
-    image: consul:1.15
+  # =====================================================
+  # CONSUL
+  # =====================================================
 
+  consul:
+    image: consul:1.15
     container_name: api-jmv-consul
 
     command: agent -dev -client=0.0.0.0
@@ -394,12 +427,12 @@ services:
 
     restart: unless-stopped
 
-  vault:
-    # -----------------------------------------------------
-    # HashiCorp Vault
-    # -----------------------------------------------------
-    image: hashicorp/vault:1.15
+  # =====================================================
+  # VAULT
+  # =====================================================
 
+  vault:
+    image: hashicorp/vault:1.15
     container_name: api-jmv-vault
 
     ports:
@@ -419,10 +452,103 @@ services:
 
     restart: unless-stopped
 
+  # =====================================================
+  # ELASTICSEARCH
+  # =====================================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    container_name: api-jmv-elasticsearch
+
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.ml.enabled: "false"
+      ingest.geoip.downloader.enabled: "false"
+      ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+
+    ports:
+      - "9200:9200"
+
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data
+
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200 >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
+  # =====================================================
+  # LOGSTASH
+  # =====================================================
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.3
+    container_name: api-jmv-logstash
+
+    environment:
+      LS_JAVA_OPTS: "-Xms128m -Xmx128m"
+
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+
+    volumes:
+      - ./elk/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+
+    depends_on:
+      elasticsearch:
+        condition: service_started
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
+  # =====================================================
+  # KIBANA
+  # =====================================================
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.3
+    container_name: api-jmv-kibana
+
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      NODE_OPTIONS: "--max-old-space-size=256"
+
+    ports:
+      - "5601:5601"
+
+    depends_on:
+      elasticsearch:
+        condition: service_started
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
+# =====================================================
+# VOLUMES
+# =====================================================
+
 volumes:
   postgres_data:
   redis_data:
   kafka_data:
+  elastic_data:
+
+# =====================================================
+# NETWORK
+# =====================================================
 
 networks:
   api_jmv_network:
