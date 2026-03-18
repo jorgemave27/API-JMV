@@ -100,6 +100,7 @@ rsa==4.9.1
 ruff==0.15.5
 s3transfer==0.16.0
 scalar_fastapi==1.8.0
+sentry-sdk==2.55.0
 setuptools==82.0.1
 shellingham==1.5.4
 six==1.17.0

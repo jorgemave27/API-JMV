@@ -18,11 +18,6 @@ APP_ENV = os.getenv("APP_ENV", "development")
 # -----------------------------------------------------
 # Cargar secretos desde Vault ANTES de construir settings
 # -----------------------------------------------------
-# IMPORTANTE:
-# - En tests NO debemos pisar variables de entorno
-# - Si una variable ya existe en os.environ, se respeta
-# - Vault solo rellena faltantes
-# -----------------------------------------------------
 try:
     if APP_ENV != "test" and vault_client.enabled():
         secrets_data = vault_client.read_secret("secret/mi-api")
@@ -33,15 +28,12 @@ try:
         if "DB_PASSWORD" in secrets_data and not os.getenv("DB_PASSWORD"):
             os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
 
-        # compat legacy opcional
         if "ENCRYPTION_KEY" in secrets_data and not os.getenv("ENCRYPTION_KEY"):
             os.environ["ENCRYPTION_KEY"] = secrets_data["ENCRYPTION_KEY"]
 
-        # KMS local para desarrollo / fallback
         if "LOCAL_KMS_MASTER_KEY" in secrets_data and not os.getenv("LOCAL_KMS_MASTER_KEY"):
             os.environ["LOCAL_KMS_MASTER_KEY"] = secrets_data["LOCAL_KMS_MASTER_KEY"]
 
-        # KMS AWS
         if "AWS_KMS_KEY_ID" in secrets_data and not os.getenv("AWS_KMS_KEY_ID"):
             os.environ["AWS_KMS_KEY_ID"] = secrets_data["AWS_KMS_KEY_ID"]
 
@@ -52,7 +44,6 @@ try:
             os.environ["KMS_PROVIDER"] = secrets_data["KMS_PROVIDER"]
 
 except Exception:
-    # Vault no debe romper el arranque
     pass
 
 
@@ -61,14 +52,6 @@ except Exception:
 # =====================================================
 
 def rate_limit_key_func(request: Request) -> str:
-    """
-    Genera la clave para rate limiting.
-
-    Reglas:
-    - Si existe un JWT válido, usa el user_id / subject del token
-    - Si no existe o no es válido, usa la IP del cliente
-    """
-
     auth_header = request.headers.get("Authorization")
 
     if auth_header and auth_header.startswith("Bearer "):
@@ -90,13 +73,8 @@ def rate_limit_key_func(request: Request) -> str:
 
 
 def dynamic_rate_limit(key: str) -> str:
-    """
-    Ejemplo de rate limit dinámico.
-    """
-
     if key.startswith("user:"):
         return "1000/minute"
-
     return "50/minute"
 
 
@@ -109,41 +87,60 @@ limiter = Limiter(key_func=rate_limit_key_func)
 
 class Settings(BaseSettings):
 
+    # -------------------------------------------------
+    # Core
+    # -------------------------------------------------
     DATABASE_URL: str
     API_KEY: str
-    APP_VERSION: str = "1.0.0"
-
     JWT_SECRET_KEY: str
+
+    APP_NAME: str = "API JMV"
+    APP_ENV: str = APP_ENV
+    VERSION: str = "1.0.0"
+
+    # 👉 SENTRY
+    SENTRY_DSN: str | None = None
+
+    # -------------------------------------------------
+    # JWT
+    # -------------------------------------------------
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # -------------------------------------------------
+    # App config
+    # -------------------------------------------------
     CORS_ALLOW_ORIGINS: str = "http://localhost:3000,https://mi-app.com"
     LOG_LEVEL: str = "INFO"
-
-    APP_NAME: str = "API JMV"
-    APP_ENV: str = APP_ENV
-
     MAX_ITEMS_PER_PAGE: int = 100
 
+    # -------------------------------------------------
     # Redis / Cache
+    # -------------------------------------------------
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_ENABLED: bool = True
     CACHE_TTL_ITEM_SECONDS: int = 300
     CACHE_TTL_LIST_SECONDS: int = 300
 
+    # -------------------------------------------------
     # Celery
+    # -------------------------------------------------
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     CELERY_ENABLED: bool = False
 
+    # -------------------------------------------------
     # Kafka
+    # -------------------------------------------------
     KAFKA_ENABLED: bool = True
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
     KAFKA_CLIENT_ID: str = "api-jmv"
     KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
 
+    # -------------------------------------------------
     # Consul
+    # -------------------------------------------------
     CONSUL_ENABLED: bool = False
     CONSUL_HOST: str = "localhost"
     CONSUL_PORT: int = 8500
@@ -153,24 +150,29 @@ class Settings(BaseSettings):
     SERVICE_PORT: int = 8000
     SERVICE_TAGS: str = "api,fastapi,jmv"
 
+    # -------------------------------------------------
     # Resilience
+    # -------------------------------------------------
     EXTERNAL_HTTP_TIMEOUT_SECONDS: float = 3.0
     EXTERNAL_CACHE_TTL_SECONDS: int = 300
     RESILIENCE_MOCK_BASE_URL: str = "http://127.0.0.1:8000/api/v1/admin/resilience/mock-external"
 
     # -------------------------------------------------
-    # Seguridad / cifrado legacy
+    # Seguridad / cifrado
     # -------------------------------------------------
     ENCRYPTION_KEY: str | None = None
 
     # -------------------------------------------------
-    # KMS / Envelope Encryption
+    # KMS
     # -------------------------------------------------
     KMS_PROVIDER: str = "local"
     LOCAL_KMS_MASTER_KEY: str | None = None
     AWS_KMS_KEY_ID: str | None = None
     AWS_REGION: str | None = None
 
+    # -------------------------------------------------
+    # Pydantic config
+    # -------------------------------------------------
     model_config = SettingsConfigDict(
         env_file=f".env.{APP_ENV}",
         env_file_encoding="utf-8",
@@ -184,19 +186,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_allow_origins_list(self) -> list[str]:
-        return [
-            origin.strip()
-            for origin in self.CORS_ALLOW_ORIGINS.split(",")
-            if origin.strip()
-        ]
+        return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
 
     @property
     def service_tags_list(self) -> list[str]:
-        return [
-            tag.strip()
-            for tag in self.SERVICE_TAGS.split(",")
-            if tag.strip()
-        ]
+        return [t.strip() for t in self.SERVICE_TAGS.split(",") if t.strip()]
 
     # -------------------------------------------------
     # Validaciones
@@ -204,31 +198,29 @@ class Settings(BaseSettings):
 
     @field_validator("API_KEY")
     @classmethod
-    def validate_api_key_length(cls, value: str) -> str:
-        if len(value) < 16:
+    def validate_api_key_length(cls, v: str) -> str:
+        if len(v) < 16:
             raise ValueError("API_KEY debe tener al menos 16 caracteres")
-        return value
+        return v
 
     @field_validator("JWT_SECRET_KEY")
     @classmethod
-    def validate_jwt_secret_key_length(cls, value: str) -> str:
-        if len(value) < 16:
+    def validate_jwt_secret_key_length(cls, v: str) -> str:
+        if len(v) < 16:
             raise ValueError("JWT_SECRET_KEY debe tener al menos 16 caracteres")
-        return value
+        return v
 
     @field_validator("KMS_PROVIDER")
     @classmethod
-    def validate_kms_provider(cls, value: str) -> str:
-        normalized = value.lower().strip()
-
-        if normalized not in {"local", "aws"}:
+    def validate_kms_provider(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in {"local", "aws"}:
             raise ValueError("KMS_PROVIDER debe ser 'local' o 'aws'")
-
-        return normalized
+        return v
 
 
 # =====================================================
-# Singleton settings
+# Singleton
 # =====================================================
 
 @lru_cache

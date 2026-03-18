@@ -4,6 +4,8 @@ from __future__ import annotations
 # IMPORTS
 # =====================================================
 
+import sentry_sdk
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -16,6 +18,12 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 # -----------------------------------------------------
+# SENTRY
+# -----------------------------------------------------
+
+from app.core.sentry import init_sentry
+
+# -----------------------------------------------------
 # ROUTERS
 # -----------------------------------------------------
 
@@ -26,6 +34,7 @@ from app.api.version import router as version_router
 from app.api.v1.endpoints.operaciones import router as operaciones_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.usuarios import router as usuarios_router
+from app.api.v1.endpoints.debug import router as debug_router
 
 from app.routers.categorias import router as categorias_router
 from app.oauth.router import router as oauth_router
@@ -66,6 +75,9 @@ from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
 from app.middlewares.elk_logging import ELKLoggingMiddleware
 
+# 👉 NUEVO
+from app.middleware.sentry_user import SentryUserMiddleware
+
 # -----------------------------------------------------
 # SERVICES
 # -----------------------------------------------------
@@ -74,6 +86,13 @@ from app.services.metrics_service import (
     sync_active_items_gauge,
     sync_active_users_gauge,
 )
+
+
+# =====================================================
+# INIT SENTRY (ANTES DE TODO)
+# =====================================================
+
+init_sentry()
 
 
 # =====================================================
@@ -93,10 +112,6 @@ OPENAPI_TAGS = [
 # =====================================================
 
 def create_app() -> FastAPI:
-    """
-    Crea y configura la instancia principal de FastAPI.
-    """
-
     setup_logging()
 
     docs_url = "/docs"
@@ -110,13 +125,16 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=settings.APP_NAME,
-        version="1.0.0",
+        version=settings.VERSION,
         description="API JMV",
         openapi_tags=OPENAPI_TAGS,
         docs_url=docs_url,
         redoc_url=redoc_url,
         openapi_url=openapi_url,
     )
+
+    # 👉 TAG RELEASE EN SENTRY
+    sentry_sdk.set_tag("release", settings.VERSION)
 
     app.state.consul_service_id = None
 
@@ -143,6 +161,9 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityAnomalyMiddleware)
     app.add_middleware(TraceIdMiddleware)
     app.add_middleware(ELKLoggingMiddleware)
+
+    # 👉 SENTRY USER CONTEXT
+    app.add_middleware(SentryUserMiddleware)
 
     # =================================================
     # DB INIT
@@ -176,7 +197,6 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def deregister_consul():
-
         if not settings.CONSUL_ENABLED:
             return
 
@@ -192,12 +212,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
 
-        errores = []
-
-        for err in exc.errors():
-            loc = " -> ".join(str(x) for x in err.get("loc", []))
-            msg = err.get("msg", "Error de validación")
-            errores.append(f"{loc}: {msg}")
+        errores = [
+            f"{' -> '.join(map(str, err['loc']))}: {err['msg']}"
+            for err in exc.errors()
+        ]
 
         request_id = getattr(request.state, "request_id", None)
 
@@ -226,10 +244,6 @@ def create_app() -> FastAPI:
             },
         )
 
-    # =================================================
-    # HANDLER ITEM NO ENCONTRADO
-    # =================================================
-
     @app.exception_handler(ItemNoEncontradoError)
     async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
 
@@ -244,10 +258,6 @@ def create_app() -> FastAPI:
                 "metadata": {"request_id": request_id} if request_id else {},
             },
         )
-
-    # =================================================
-    # HANDLER STOCK INSUFICIENTE
-    # =================================================
 
     @app.exception_handler(StockInsuficienteError)
     async def stock_handler(request: Request, exc: StockInsuficienteError):
@@ -268,32 +278,24 @@ def create_app() -> FastAPI:
         )
 
     # =================================================
-    # DOCS ALTERNATIVAS
+    # DOCS
     # =================================================
 
     @app.get("/scalar", include_in_schema=False)
     async def scalar_docs() -> HTMLResponse:
-
         return get_scalar_api_reference(
             openapi_url=app.openapi_url,
             title=f"{settings.APP_NAME} - Scalar",
         )
 
-    # =================================================
-    # SECURITY.TXT
-    # =================================================
-
     @app.get("/.well-known/security.txt", include_in_schema=False)
     async def security_txt():
-
-        content = """
+        return PlainTextResponse("""
 Contact: mailto:security@empresa.com
 Expires: 2030-12-31T23:59:59.000Z
 Preferred-Languages: es,en
 Policy: https://empresa.com/security-policy
-"""
-
-        return PlainTextResponse(content.strip())
+""".strip())
 
     # =================================================
     # ROUTERS
@@ -306,13 +308,11 @@ Policy: https://empresa.com/security-policy
     app.include_router(api_router_v2, prefix="/api/v2")
     app.include_router(operaciones_router, prefix="/api/v1")
 
-    app.include_router(
-        usuarios_router,
-        prefix="/api/v1/usuarios",
-        tags=["Usuarios"],
-    )
-
+    app.include_router(usuarios_router, prefix="/api/v1/usuarios", tags=["Usuarios"])
     app.include_router(oauth_router)
+
+    # 👉 DEBUG (SENTRY TEST)
+    app.include_router(debug_router, prefix="/debug", tags=["debug"])
 
     # =================================================
     # PROMETHEUS
