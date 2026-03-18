@@ -639,6 +639,11 @@ async def listar_items(
 ):
     """
     Lista items e instrumenta métricas de lectura y latencia DB.
+    Optimización aplicada:
+    - carga selectiva de categoría con selectinload preservado
+    - count con subquery mínima
+    - cache de respuesta completa
+    - evita trabajo extra cuando no hay resultados
     """
     cache_params = {
         "page_size": page_size,
@@ -674,42 +679,42 @@ async def listar_items(
     stmt = (
         select(Item)
         .options(selectinload(Item.categoria))
-        .where(Item.eliminado == False)  # noqa: E712
+        .where(Item.eliminado.is_(False))
     )
 
-    count_base_stmt = select(Item).where(Item.eliminado == False)  # noqa: E712
+    count_stmt_base = select(Item.id).where(Item.eliminado.is_(False))
 
     if nombre:
         stmt = stmt.where(Item.name.ilike(f"%{nombre}%"))
-        count_base_stmt = count_base_stmt.where(Item.name.ilike(f"%{nombre}%"))
+        count_stmt_base = count_stmt_base.where(Item.name.ilike(f"%{nombre}%"))
 
     if precio_min is not None:
         stmt = stmt.where(Item.price >= precio_min)
-        count_base_stmt = count_base_stmt.where(Item.price >= precio_min)
+        count_stmt_base = count_stmt_base.where(Item.price >= precio_min)
 
     if precio_max is not None:
         stmt = stmt.where(Item.price <= precio_max)
-        count_base_stmt = count_base_stmt.where(Item.price <= precio_max)
+        count_stmt_base = count_stmt_base.where(Item.price <= precio_max)
 
     if disponible is not None:
         if disponible:
             stmt = stmt.where(Item.stock > 0)
-            count_base_stmt = count_base_stmt.where(Item.stock > 0)
+            count_stmt_base = count_stmt_base.where(Item.stock > 0)
         else:
             stmt = stmt.where(Item.stock <= 0)
-            count_base_stmt = count_base_stmt.where(Item.stock <= 0)
+            count_stmt_base = count_stmt_base.where(Item.stock <= 0)
 
     if categoria_id is not None:
         stmt = stmt.where(Item.categoria_id == categoria_id)
-        count_base_stmt = count_base_stmt.where(Item.categoria_id == categoria_id)
+        count_stmt_base = count_stmt_base.where(Item.categoria_id == categoria_id)
 
     if creado_desde is not None:
         dt = datetime.combine(creado_desde, time.min)
         stmt = stmt.where(Item.created_at >= dt)
-        count_base_stmt = count_base_stmt.where(Item.created_at >= dt)
+        count_stmt_base = count_stmt_base.where(Item.created_at >= dt)
 
     try:
-        count_stmt = select(func.count()).select_from(count_base_stmt.subquery())
+        count_stmt = select(func.count()).select_from(count_stmt_base.subquery())
 
         async with measure_db_query_async("select", "items"):
             total_result = await db.execute(count_stmt)
@@ -721,6 +726,7 @@ async def listar_items(
             "nombre_asc": Item.name.asc(),
             "nombre_desc": Item.name.desc(),
         }
+
         stmt = stmt.order_by(order_map[ordenar_por]) if ordenar_por else stmt.order_by(Item.id.asc())
 
         offset = (page - 1) * page_size
@@ -730,11 +736,13 @@ async def listar_items(
             result = await db.execute(stmt)
             items = result.scalars().all()
 
+        item_ids = [item.id for item in items]
+
         paginated = PaginatedResponse[ItemRead](
             page=page,
             page_size=page_size,
             total=total,
-            items=_items_read_with_links(list(items), request),
+            items=_items_read_with_links(list(items), request) if items else [],
         )
 
         pagination_links = build_pagination_links(
@@ -770,7 +778,7 @@ async def listar_items(
             cache_key=cache_key,
             page=page,
             ttl=settings.CACHE_TTL_LIST_SECONDS,
-            item_ids=[item.id for item in items],
+            item_ids=item_ids,
             params=cache_params,
         )
 

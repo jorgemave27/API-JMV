@@ -13,6 +13,9 @@ from app.api.v1.endpoints.admin_circuit_breakers import router as admin_circuit_
 # Eventos de seguridad registrados por el sistema
 from app.api.v1.endpoints.admin_security import router as admin_security_router
 
+# Profiling / rendimiento
+from app.api.v1.endpoints.admin_profile import router as admin_profile_router
+
 # Autenticación JWT / OAuth
 from app.api.v1.endpoints.auth import router as auth_router
 
@@ -41,8 +44,8 @@ from app.api.v1.endpoints.security_txt import router as security_txt_router
 # OpenID discovery (descubrimiento automático de endpoints OAuth)
 from app.api.v1.endpoints.openid_discovery import router as openid_router
 
+# GDPR
 from app.api.v1.endpoints import gdpr
-
 
 
 # =====================================================
@@ -138,6 +141,17 @@ api_router_v1.include_router(
 
 
 # =====================================================
+# PROFILING
+# =====================================================
+
+api_router_v1.include_router(
+    admin_profile_router,
+    prefix="/admin",
+    tags=["Admin Profiling"],
+)
+
+
+# =====================================================
 # REPORTES
 # =====================================================
 
@@ -162,5 +176,8 @@ api_router_v1.include_router(
     openid_router
 )
 
-api_router_v1.include_router(gdpr.router, tags=["GDPR"])
-
+# GDPR
+api_router_v1.include_router(
+    gdpr.router,
+    tags=["GDPR"],
+)

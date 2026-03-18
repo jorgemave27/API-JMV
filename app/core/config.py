@@ -179,6 +179,13 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+    # -------------------------------------------------
+    # Profiling / Performance
+    # -------------------------------------------------
+    PROFILING_ENABLED: bool = True
+    PROFILING_SLOW_REQUEST_THRESHOLD_MS: float = 500.0
+    PROFILING_CONSECUTIVE_SLOW_REQUESTS: int = 3
+    PROFILING_OUTPUT_DIR: str = "profiles"
 
     # -------------------------------------------------
     # Helpers

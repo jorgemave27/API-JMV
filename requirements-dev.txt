@@ -1,0 +1,4 @@
+pyinstrument==4.6.2
+memory-profiler==0.61.0
+line-profiler==4.1.2
+py-spy==0.3.14

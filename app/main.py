@@ -64,6 +64,7 @@ from app.discovery.consul_client import deregister_service, register_service
 # -----------------------------------------------------
 
 from app.middlewares.audit_context import AuditContextMiddleware
+from app.middlewares.auto_profiler import AutoProfilerMiddleware
 from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
@@ -75,7 +76,6 @@ from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
 from app.middlewares.elk_logging import ELKLoggingMiddleware
 
-# 👉 NUEVO
 from app.middleware.sentry_user import SentryUserMiddleware
 
 # -----------------------------------------------------
@@ -133,10 +133,10 @@ def create_app() -> FastAPI:
         openapi_url=openapi_url,
     )
 
-    # 👉 TAG RELEASE EN SENTRY
     sentry_sdk.set_tag("release", settings.VERSION)
 
     app.state.consul_service_id = None
+    app.state.last_request_profile_candidate = None
 
     # =================================================
     # RATE LIMIT
@@ -156,13 +156,12 @@ def create_app() -> FastAPI:
     app.add_middleware(DynamicCORSMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(AutoProfilerMiddleware)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(SQLInjectionWarningMiddleware)
     app.add_middleware(SecurityAnomalyMiddleware)
     app.add_middleware(TraceIdMiddleware)
     app.add_middleware(ELKLoggingMiddleware)
-
-    # 👉 SENTRY USER CONTEXT
     app.add_middleware(SentryUserMiddleware)
 
     # =================================================
@@ -310,8 +309,6 @@ Policy: https://empresa.com/security-policy
 
     app.include_router(usuarios_router, prefix="/api/v1/usuarios", tags=["Usuarios"])
     app.include_router(oauth_router)
-
-    # 👉 DEBUG (SENTRY TEST)
     app.include_router(debug_router, prefix="/debug", tags=["debug"])
 
     # =================================================
