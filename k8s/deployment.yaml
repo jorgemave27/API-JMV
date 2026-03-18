@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-jmv
+  labels:
+    app: api-jmv
+spec:
+  # ==========================================================
+  # réplicas mínimas para cumplir con la tarea
+  # ==========================================================
+  replicas: 2
+
+  # Conserva historial de revisiones para rollback
+  revisionHistoryLimit: 5
+
+  # ==========================================================
+  # Estrategia rolling update
+  # - No baja pods disponibles durante update
+  # - Sube 1 pod extra temporalmente
+  # ==========================================================
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  # Selector que debe coincidir con labels del template
+  selector:
+    matchLabels:
+      app: api-jmv
+      component: api
+
+  template:
+    metadata:
+      labels:
+        app: api-jmv
+        component: api
+
+    spec:
+      # Tiempo de gracia antes de matar el contenedor
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: api-jmv
+
+          # ==========================================================
+          # Imagen local cargada en minikube
+          # Si luego usas registry, aquí cambias el nombre/tag
+          # ==========================================================
+          image: api-jmv:latest
+          imagePullPolicy: IfNotPresent
+
+          # ==========================================================
+          # deployment + probes + service + ingress + hpa.
+          # ==========================================================
+          command: ["/bin/sh", "-c"]
+          args:
+            - uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+          # Puerto expuesto por FastAPI/Uvicorn
+          ports:
+            - name: http
+              containerPort: 8000
+
+          # ==========================================================
+          # Variables desde ConfigMap + Secret
+          # ==========================================================
+          envFrom:
+            - configMapRef:
+                name: api-jmv-config
+            - secretRef:
+                name: api-jmv-secret
+
+          # ==========================================================
+          # Readiness Probe
+          # - Indica cuándo el pod ya puede recibir tráfico
+          # ==========================================================
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          # ==========================================================
+          # Liveness Probe
+          # - Reinicia el contenedor si queda colgado
+          # ==========================================================
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          # ==========================================================
+          # Startup Probe
+          # - Da tiempo al arranque inicial antes de evaluar liveness
+          # ==========================================================
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 18
+
+          # ==========================================================
+          # Recursos para scheduling + HPA
+          # ==========================================================
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+
+          # ==========================================================
+          # Hook de apagado elegante
+          # - Da unos segundos para que deje de recibir tráfico
+          # ==========================================================
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]

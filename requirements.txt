@@ -92,6 +92,7 @@ python-discovery==1.1.1
 python-dotenv==1.2.2
 python-jose==3.5.0
 python-logstash-async==4.1.0
+pyinstrument==5.0.1
 PyYAML==6.0.3
 redis==6.4.0
 requests==2.32.5

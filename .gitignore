@@ -20,3 +20,6 @@ venv/
 
 # OS
 .DS_Store
+# Binarios locales
+minikube-darwin-amd64
+minikube-darwin-arm64
