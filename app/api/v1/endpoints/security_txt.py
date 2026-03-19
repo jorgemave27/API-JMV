@@ -5,13 +5,8 @@ from fastapi.responses import PlainTextResponse
 router = APIRouter()
 
 
-@router.get(
-    "/.well-known/security.txt",
-    response_class=PlainTextResponse,
-    include_in_schema=False
-)
+@router.get("/.well-known/security.txt", response_class=PlainTextResponse, include_in_schema=False)
 def security_txt():
-
     """
     security.txt es un estándar que permite a investigadores
     de seguridad saber cómo reportar vulnerabilidades.

@@ -13,12 +13,10 @@ import uuid
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-
 TRACE_HEADER = "X-Trace-Id"
 
 
 class TraceIdMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(self, request: Request, call_next):
 
         trace_id = request.headers.get(TRACE_HEADER)

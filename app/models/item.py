@@ -22,10 +22,10 @@ from app.core.request_context import get_current_client_ip, get_current_user_id
 from app.database.database import Base
 from app.models.auditoria_item import AuditoriaItem
 
-
 # -------------------------------------------------------------------
 # Helpers internos para serialización
 # -------------------------------------------------------------------
+
 
 def _serialize_value(value: Any) -> Any:
     """
@@ -45,10 +45,7 @@ def _serialize_item_state(target: "Item") -> dict[str, Any]:
     """
     Convierte el estado completo actual del item a dict serializable.
     """
-    return {
-        column.name: _serialize_value(getattr(target, column.name))
-        for column in target.__table__.columns
-    }
+    return {column.name: _serialize_value(getattr(target, column.name)) for column in target.__table__.columns}
 
 
 def _build_previous_and_new_state(target: "Item") -> tuple[dict[str, Any], dict[str, Any], bool]:
@@ -140,9 +137,7 @@ class Item(Base):
     # -------------------------------------------------------------
     # Índice compuesto para búsquedas frecuentes
     # -------------------------------------------------------------
-    __table_args__ = (
-        Index("ix_items_name_eliminado", "name", "eliminado"),
-    )
+    __table_args__ = (Index("ix_items_name_eliminado", "name", "eliminado"),)
 
     # -------------------------------------------------------------
     # Identificación básica
@@ -192,6 +187,7 @@ class Item(Base):
 # Eventos ORM de auditoría
 # -------------------------------------------------------------------
 
+
 @event.listens_for(Item, "after_insert")
 def audit_item_after_insert(mapper, connection, target: Item) -> None:
     """
@@ -220,11 +216,7 @@ def audit_item_after_update(mapper, connection, target: Item) -> None:
     if not has_changes:
         return
 
-    accion = (
-        "DELETE"
-        if previous.get("eliminado") is False and new_state.get("eliminado") is True
-        else "UPDATE"
-    )
+    accion = "DELETE" if previous.get("eliminado") is False and new_state.get("eliminado") is True else "UPDATE"
 
     _insert_audit_row(
         connection,

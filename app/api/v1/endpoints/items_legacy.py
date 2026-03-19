@@ -90,9 +90,7 @@ def _publicar_evento_item(routing_key: str, payload: dict) -> None:
     try:
         asyncio.run(_run())
     except Exception as exc:
-        logger.warning(
-            f"No se pudo publicar evento RabbitMQ ({routing_key}): {exc}"
-        )
+        logger.warning(f"No se pudo publicar evento RabbitMQ ({routing_key}): {exc}")
 
 
 def _bind_audit_user(current_user: Usuario | None) -> None:
@@ -189,11 +187,7 @@ def _build_page_url(request: Request, query_params: dict[str, Any], page: int) -
     """
     Construye URL de paginación preservando query params.
     """
-    params = {
-        key: value
-        for key, value in query_params.items()
-        if value is not None
-    }
+    params = {key: value for key, value in query_params.items() if value is not None}
     params["page"] = page
     return f"{request.url.path}?{urlencode(params, doseq=True)}"
 
@@ -250,9 +244,7 @@ def crear_item(
     categoria = None
     if payload.categoria_id is not None:
         with measure_db_query("select", "categorias"):
-            categoria = db.execute(
-                select(Categoria).where(Categoria.id == payload.categoria_id)
-            ).scalars().first()
+            categoria = db.execute(select(Categoria).where(Categoria.id == payload.categoria_id)).scalars().first()
 
         if not categoria:
             increment_crud_operation("item", "create", "error")
@@ -342,13 +334,7 @@ def bulk_create_items(
 
         if categorias_ids:
             with measure_db_query("select", "categorias"):
-                categorias = (
-                    db.execute(
-                        select(Categoria).where(Categoria.id.in_(categorias_ids))
-                    )
-                    .scalars()
-                    .all()
-                )
+                categorias = db.execute(select(Categoria).where(Categoria.id.in_(categorias_ids))).scalars().all()
             categorias_map = {categoria.id: categoria for categoria in categorias}
 
         for it in payload.items:
@@ -480,9 +466,7 @@ def bulk_delete_items(
             delete_cache(build_item_cache_key(item_id))
             invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-        logger.info(
-            f"Bulk delete procesado: deleted={deleted}, not_found={not_found}"
-        )
+        logger.info(f"Bulk delete procesado: deleted={deleted}, not_found={not_found}")
 
         return ApiResponse[dict](
             success=True,
@@ -676,11 +660,7 @@ async def listar_items(
         increment_crud_operation("item", "list", "success")
         return cached_page
 
-    stmt = (
-        select(Item)
-        .options(selectinload(Item.categoria))
-        .where(Item.eliminado.is_(False))
-    )
+    stmt = select(Item).options(selectinload(Item.categoria)).where(Item.eliminado.is_(False))
 
     count_stmt_base = select(Item.id).where(Item.eliminado.is_(False))
 
@@ -808,12 +788,7 @@ def buscar_items(
     """
     try:
         with measure_db_query("select", "items"):
-            items = (
-                db.query(Item)
-                .filter(Item.name == nombre, Item.eliminado.is_(False))
-                .order_by(Item.id.asc())
-                .all()
-            )
+            items = db.query(Item).filter(Item.name == nombre, Item.eliminado.is_(False)).order_by(Item.id.asc()).all()
 
         increment_crud_operation("item", "search", "success")
 
@@ -1042,13 +1017,7 @@ def actualizar_item(
     categoria = None
     if payload.categoria_id is not None:
         with measure_db_query("select", "categorias"):
-            categoria = (
-                db.execute(
-                    select(Categoria).where(Categoria.id == payload.categoria_id)
-                )
-                .scalars()
-                .first()
-            )
+            categoria = db.execute(select(Categoria).where(Categoria.id == payload.categoria_id)).scalars().first()
 
         if not categoria:
             increment_crud_operation("item", "update", "error")
@@ -1087,9 +1056,7 @@ def actualizar_item(
             current_user=current_user,
         )
 
-        logger.info(
-            f"Item actualizado: id={item.id}, usuario={current_user.email}"
-        )
+        logger.info(f"Item actualizado: id={item.id}, usuario={current_user.email}")
 
         return ApiResponse[ItemRead](
             success=True,
@@ -1236,9 +1203,7 @@ def eliminar_item(
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
-        logger.warning(
-            f"Intento de eliminar un item ya eliminado: id={item.id}, usuario={current_user.email}"
-        )
+        logger.warning(f"Intento de eliminar un item ya eliminado: id={item.id}, usuario={current_user.email}")
         increment_crud_operation("item", "delete", "success")
         return ApiResponse[dict](
             success=True,
@@ -1281,9 +1246,7 @@ def eliminar_item(
             current_user=current_user,
         )
 
-        logger.info(
-            f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}"
-        )
+        logger.info(f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}")
 
         return ApiResponse[dict](
             success=True,

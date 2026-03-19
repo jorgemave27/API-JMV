@@ -119,6 +119,7 @@ def generar_reporte_stock_bajo() -> dict:
 # GDPR DATA RETENTION TASK
 # =====================================================
 
+
 @celery_app.task(name="app.workers.tasks.anonimizar_usuarios_inactivos")
 def anonimizar_usuarios_inactivos() -> dict:
     """
@@ -130,7 +131,6 @@ def anonimizar_usuarios_inactivos() -> dict:
     db: Session = SessionLocal()
 
     try:
-
         limite = datetime.utcnow() - timedelta(days=365 * 3)
 
         stmt = select(Usuario).where(
@@ -144,7 +144,6 @@ def anonimizar_usuarios_inactivos() -> dict:
         total = 0
 
         for user in usuarios:
-
             user.email = _anon_email(user.email, user.id)
             user.nombre = _anon_name(user.nombre, user.id)
             user.rfc = _anon_rfc(user.rfc, user.id)

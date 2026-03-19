@@ -12,8 +12,8 @@ Incluye:
 - usuarios inactivos
 """
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario
 
@@ -25,23 +25,11 @@ def generar_reporte_gdpr(db: Session) -> dict:
 
     total_usuarios = db.query(func.count(Usuario.id)).scalar()
 
-    usuarios_activos = (
-        db.query(func.count(Usuario.id))
-        .filter(Usuario.activo == True)
-        .scalar()
-    )
+    usuarios_activos = db.query(func.count(Usuario.id)).filter(Usuario.activo == True).scalar()
 
-    usuarios_inactivos = (
-        db.query(func.count(Usuario.id))
-        .filter(Usuario.activo == False)
-        .scalar()
-    )
+    usuarios_inactivos = db.query(func.count(Usuario.id)).filter(Usuario.activo == False).scalar()
 
-    usuarios_anonimizados = (
-        db.query(func.count(Usuario.id))
-        .filter(Usuario.email.like("anon-%"))
-        .scalar()
-    )
+    usuarios_anonimizados = db.query(func.count(Usuario.id)).filter(Usuario.email.like("anon-%")).scalar()
 
     return {
         "total_usuarios": total_usuarios,

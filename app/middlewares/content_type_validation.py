@@ -19,10 +19,7 @@ class ContentTypeValidationMiddleware(BaseHTTPMiddleware):
             content_length = request.headers.get("content-length")
             transfer_encoding = request.headers.get("transfer-encoding", "").lower()
 
-            has_body = (
-                (content_length is not None and content_length != "0")
-                or "chunked" in transfer_encoding
-            )
+            has_body = (content_length is not None and content_length != "0") or "chunked" in transfer_encoding
 
             if has_body:
                 content_type = request.headers.get("content-type", "").lower()

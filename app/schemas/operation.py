@@ -10,6 +10,7 @@ class OperationStatusResponse(BaseModel):
     """
     Respuesta para consultar el estado de una operación asíncrona CQRS.
     """
+
     operation_id: str
     status: Literal["pending", "completed", "failed"]
     resource_type: str

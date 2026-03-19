@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String
+from sqlalchemy import JSON, Column, DateTime, Integer, String
 
 from app.database.database import Base
 
@@ -58,7 +58,7 @@ class AuditoriaItem(Base):
         DateTime,
         default=datetime.utcnow,  # ✅ compatible SQLite/Postgres
         nullable=False,
-        index=True
+        index=True,
     )
 
     ip_cliente = Column(String(64), nullable=True)

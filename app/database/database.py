@@ -22,6 +22,7 @@ class Base(DeclarativeBase):
     la misma metadata. Alembic usa esta metadata para detectar cambios
     en el esquema de la base de datos.
     """
+
     pass
 
 

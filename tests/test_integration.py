@@ -249,9 +249,7 @@ def test_flujo_integracion_2_categoria_item_relacion(client, admin_token):
     )
 
     listed_items = listed["data"]["items"]
-    assert any(i["id"] == item_id for i in listed_items), (
-        "El item creado no apareció al filtrar por categoria_id."
-    )
+    assert any(i["id"] == item_id for i in listed_items), "El item creado no apareció al filtrar por categoria_id."
 
     _delete_categoria(
         client,

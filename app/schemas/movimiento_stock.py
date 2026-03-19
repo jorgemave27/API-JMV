@@ -13,5 +13,5 @@ class TransferirStockRequest(BaseModel):
     cantidad: int = Field(..., gt=0)
     usuario: str = Field(default="system", min_length=1, max_length=100)
 
-    # Solo para pruebas de rollback 
+    # Solo para pruebas de rollback
     forzar_error: bool = False

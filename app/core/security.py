@@ -17,15 +17,13 @@ from app.core.api_key_manager import api_key_manager
 from app.core.config import settings
 from app.database.database import get_db
 from app.models.usuario import Usuario
-
+from app.security.anomaly_detector import anomaly_detector
 from app.security.token_blacklist import (
     blacklist_token,
     is_blacklisted,
     save_session,
     update_last_seen,
 )
-from app.security.anomaly_detector import anomaly_detector
-
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +50,7 @@ RESET_TOKEN_EXPIRE_HOURS = 1
 # =====================================================
 # API KEY VALIDATION
 # =====================================================
+
 
 def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
     """
@@ -91,6 +90,7 @@ def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key
 # PASSWORD SECURITY
 # =====================================================
 
+
 def validate_password_complexity(password: str) -> None:
     """
     Valida complejidad mínima de contraseña.
@@ -128,6 +128,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # PASSWORD RESET TOKENS
 # =====================================================
 
+
 def generate_password_reset_token() -> str:
     """
     Genera token seguro para recuperación de contraseña.
@@ -145,6 +146,7 @@ def hash_reset_token(token: str) -> str:
 # =====================================================
 # HELPERS DE REQUEST / TOKEN
 # =====================================================
+
 
 def get_request_ip(request: Request) -> str:
     """
@@ -243,6 +245,7 @@ def register_session_from_token(
 # JWT CREATION
 # =====================================================
 
+
 def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> str:
     """
     Crea JWT con jti único.
@@ -293,6 +296,7 @@ def create_refresh_token(subject: str) -> str:
 # TOKEN DECODING
 # =====================================================
 
+
 def decode_token(token: str) -> dict:
     """
     Decodifica JWT.
@@ -317,6 +321,7 @@ def decode_token(token: str) -> dict:
 # ACCOUNT SECURITY
 # =====================================================
 
+
 def is_user_blocked(user: Usuario) -> bool:
     """
     Indica si la cuenta está temporalmente bloqueada.
@@ -332,9 +337,7 @@ def register_failed_login(db: Session, user: Usuario) -> None:
     user.failed_login_attempts += 1
 
     if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
-        user.blocked_until = datetime.utcnow() + timedelta(
-            minutes=ACCOUNT_BLOCK_MINUTES
-        )
+        user.blocked_until = datetime.utcnow() + timedelta(minutes=ACCOUNT_BLOCK_MINUTES)
 
     db.add(user)
     db.commit()
@@ -357,6 +360,7 @@ def reset_failed_login_attempts(db: Session, user: Usuario) -> None:
 # =====================================================
 # CURRENT USER
 # =====================================================
+
 
 def get_current_user(
     request: Request,
@@ -445,6 +449,7 @@ def get_current_user(
 # =====================================================
 # ROLE AUTHORIZATION
 # =====================================================
+
 
 def require_role(*roles: str):
     """

@@ -5,7 +5,8 @@ Representa aplicaciones externas que pueden usar
 tu API mediante OAuth2 Authorization Code Flow.
 """
 
-from sqlalchemy import Column, Integer, String, JSON
+from sqlalchemy import JSON, Column, Integer, String
+
 from app.database.database import Base
 
 

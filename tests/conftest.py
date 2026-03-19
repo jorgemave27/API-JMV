@@ -7,7 +7,6 @@ from __future__ import annotations
 # Estas variables deben definirse ANTES de importar cualquier
 # módulo de app.*, porque settings se construye al importar.
 # =============================================================
-
 import os
 
 os.environ["APP_ENV"] = "test"
@@ -82,6 +81,8 @@ def fake_redis():
     Instancia única de Redis fake para todos los tests.
     """
     return fakeredis.FakeRedis(decode_responses=True)
+
+
 @pytest.fixture(autouse=True)
 def override_redis(fake_redis, monkeypatch):
     """
@@ -129,7 +130,6 @@ def override_redis(fake_redis, monkeypatch):
         api_key_manager.redis = fake_redis
     except Exception:
         pass
-
 
 
 # -------------------------------------------------------------

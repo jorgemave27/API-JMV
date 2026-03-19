@@ -8,6 +8,7 @@ class CrearItemCommand:
     """
     Comando para crear un item.
     """
+
     name: str
     description: str | None
     price: float
@@ -22,6 +23,7 @@ class ActualizarItemCommand:
     """
     Comando para actualizar un item.
     """
+
     item_id: int
     name: str
     description: str | None
@@ -37,4 +39,5 @@ class EliminarItemCommand:
     """
     Comando para soft delete de un item.
     """
+
     item_id: int

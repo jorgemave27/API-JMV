@@ -5,11 +5,10 @@ Endpoints relacionados con cumplimiento GDPR / LFPDPPP.
 """
 
 from fastapi import APIRouter, Depends
-
 from sqlalchemy.orm import Session
 
-from app.database.database import get_db
 from app.core.security import verify_api_key
+from app.database.database import get_db
 from app.services.gdpr_report_service import generar_reporte_gdpr
 
 router = APIRouter()

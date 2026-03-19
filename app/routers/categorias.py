@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -97,9 +97,7 @@ def obtener_categoria(
     """
     Obtiene una categoría por su ID.
     """
-    categoria = db.execute(
-        select(Categoria).where(Categoria.id == categoria_id)
-    ).scalars().first()
+    categoria = db.execute(select(Categoria).where(Categoria.id == categoria_id)).scalars().first()
 
     if not categoria:
         return error_response(
@@ -130,9 +128,7 @@ def actualizar_categoria(
     Actualiza una categoría existente.
     """
     try:
-        categoria = db.execute(
-            select(Categoria).where(Categoria.id == categoria_id)
-        ).scalars().first()
+        categoria = db.execute(select(Categoria).where(Categoria.id == categoria_id)).scalars().first()
 
         if not categoria:
             return error_response(
@@ -189,9 +185,7 @@ def eliminar_categoria(
     - Esta eliminación es física.
     """
     try:
-        categoria = db.execute(
-            select(Categoria).where(Categoria.id == categoria_id)
-        ).scalars().first()
+        categoria = db.execute(select(Categoria).where(Categoria.id == categoria_id)).scalars().first()
 
         if not categoria:
             return error_response(

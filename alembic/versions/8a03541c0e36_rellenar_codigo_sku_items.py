@@ -5,10 +5,10 @@ Revises: 5bb819cdfc5e
 Create Date: 2026-03-06
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
-
 
 # revision identifiers, used by Alembic.
 revision: str = "8a03541c0e36"
@@ -71,20 +71,13 @@ def downgrade() -> None:
     """
     connection = op.get_bind()
 
-    rows = connection.exec_driver_sql(
-        "SELECT id, codigo_sku FROM items WHERE codigo_sku IS NOT NULL"
-    ).fetchall()
+    rows = connection.exec_driver_sql("SELECT id, codigo_sku FROM items WHERE codigo_sku IS NOT NULL").fetchall()
 
     for row in rows:
         item_id = row[0]
         codigo_sku = (row[1] or "").strip()
 
-        if (
-            len(codigo_sku) == 7
-            and codigo_sku[2] == "-"
-            and codigo_sku[:2].isalpha()
-            and codigo_sku[3:].isdigit()
-        ):
+        if len(codigo_sku) == 7 and codigo_sku[2] == "-" and codigo_sku[:2].isalpha() and codigo_sku[3:].isdigit():
             connection.exec_driver_sql(
                 "UPDATE items SET codigo_sku = NULL WHERE id = ?",
                 (item_id,),

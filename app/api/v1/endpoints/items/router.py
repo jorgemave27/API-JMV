@@ -9,8 +9,8 @@ FASE SEGURA:
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints.items_legacy import router as legacy_router
 from app.api.v1.endpoints.items_cqrs import router as cqrs_router
+from app.api.v1.endpoints.items_legacy import router as legacy_router
 
 router = APIRouter()
 

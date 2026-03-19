@@ -19,7 +19,6 @@ from typing import Any
 from logstash_async.formatter import LogstashFormatter
 from logstash_async.handler import AsynchronousLogstashHandler
 
-
 # ---------------------------------------------------------
 # Configuración básica
 # ---------------------------------------------------------
@@ -36,6 +35,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 # ---------------------------------------------------------
 # JSON Formatter
 # ---------------------------------------------------------
+
 
 class JsonFormatter(logging.Formatter):
     """
@@ -83,6 +83,7 @@ class JsonFormatter(logging.Formatter):
 # Setup logging
 # ---------------------------------------------------------
 
+
 def setup_logging() -> logging.Logger:
     """
     Configura logging global.
@@ -112,7 +113,6 @@ def setup_logging() -> logging.Logger:
     # -----------------------------------
 
     try:
-
         logstash_handler = AsynchronousLogstashHandler(
             host=LOGSTASH_HOST,
             port=LOGSTASH_PORT,

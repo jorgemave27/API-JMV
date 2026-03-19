@@ -25,6 +25,7 @@ class CommandResult:
     """
     Resultado estándar de un command.
     """
+
     resource_id: int
     operation_id: str
 
@@ -45,13 +46,7 @@ class CrearItemHandler(CommandHandler[CrearItemCommand, CommandResult]):
 
         categoria_nombre = None
         if command.categoria_id is not None:
-            categoria = (
-                self.db.execute(
-                    select(Categoria).where(Categoria.id == command.categoria_id)
-                )
-                .scalars()
-                .first()
-            )
+            categoria = self.db.execute(select(Categoria).where(Categoria.id == command.categoria_id)).scalars().first()
             if not categoria:
                 raise ValueError(f"La categoría con id={command.categoria_id} no existe")
             categoria_nombre = categoria.nombre
@@ -117,13 +112,7 @@ class ActualizarItemHandler(CommandHandler[ActualizarItemCommand, CommandResult]
 
         categoria_nombre = None
         if command.categoria_id is not None:
-            categoria = (
-                self.db.execute(
-                    select(Categoria).where(Categoria.id == command.categoria_id)
-                )
-                .scalars()
-                .first()
-            )
+            categoria = self.db.execute(select(Categoria).where(Categoria.id == command.categoria_id)).scalars().first()
             if not categoria:
                 raise ValueError(f"La categoría con id={command.categoria_id} no existe")
             categoria_nombre = categoria.nombre

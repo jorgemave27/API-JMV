@@ -9,8 +9,9 @@ Responsabilidades:
 """
 
 import os
-import hvac
 from typing import Optional
+
+import hvac
 
 
 class VaultClient:
@@ -49,9 +50,7 @@ class VaultClient:
         if not self.client:
             raise RuntimeError("Vault no habilitado")
 
-        response = self.client.secrets.kv.v2.read_secret_version(
-            path=path.replace("secret/", "")
-        )
+        response = self.client.secrets.kv.v2.read_secret_version(path=path.replace("secret/", ""))
 
         return response["data"]["data"]
 

@@ -5,10 +5,10 @@ Revises: 6021b7c28b7c
 Create Date: 2026-03-06 13:45:10.178871
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
-
 
 # revision identifiers, used by Alembic.
 revision: str = "5bb819cdfc5e"
@@ -28,9 +28,7 @@ def upgrade() -> None:
     """
     connection = op.get_bind()
 
-    rows = connection.exec_driver_sql(
-        "SELECT id, name FROM items WHERE name IS NOT NULL"
-    ).fetchall()
+    rows = connection.exec_driver_sql("SELECT id, name FROM items WHERE name IS NOT NULL").fetchall()
 
     for row in rows:
         item_id = row[0]
@@ -51,6 +49,4 @@ def downgrade() -> None:
     No se puede reconstruir con certeza el formato original de cada nombre
     antes de haber sido normalizado.
     """
-    raise NotImplementedError(
-        "La migración normalizar_nombres_items no es reversible."
-    )
+    raise NotImplementedError("La migración normalizar_nombres_items no es reversible.")

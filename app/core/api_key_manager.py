@@ -19,7 +19,6 @@ from redis.exceptions import RedisError
 from app.core.config import settings
 from app.core.vault import vault_client
 
-
 REDIS_API_KEY_ACTIVE = "security:api_key:active"
 REDIS_API_KEY_PREVIOUS = "security:api_key:previous"
 REDIS_API_KEY_ROTATED_AT = "security:api_key:rotated_at"

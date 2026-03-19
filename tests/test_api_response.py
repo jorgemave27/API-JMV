@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.conftest import create_item, request_id_from, unwrap, rand_sku
+from tests.conftest import create_item, rand_sku, request_id_from, unwrap
 
 
 def test_api_response_wrapper_en_list(client, auth_headers):

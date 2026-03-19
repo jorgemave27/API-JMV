@@ -29,7 +29,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -37,13 +37,12 @@ from app.core.deps import log_client_ip
 from app.core.security import verify_api_key
 from app.database.database import get_db
 from app.models.item import Item
-from app.schemas.base import ApiResponse
-from app.schemas.item import ItemReadV2
-from app.schemas.pagination import PaginatedResponse
 from app.models.movimiento_stock import MovimientoStock
-from app.schemas.movimiento_stock import TransferirStockRequest
+from app.schemas.base import ApiResponse
 from app.schemas.cursor_pagination import CursorPaginationResponse
-
+from app.schemas.item import ItemReadV2
+from app.schemas.movimiento_stock import TransferirStockRequest
+from app.schemas.pagination import PaginatedResponse
 
 # Router de la versión 2
 router = APIRouter()
@@ -168,6 +167,7 @@ def listar_items_v2(
         metadata={},
     )
 
+
 @router.get(
     "/cursor",
     response_model=ApiResponse[CursorPaginationResponse],
@@ -215,6 +215,7 @@ def listar_items_cursor(
         data=data,
         metadata={},
     )
+
 
 @router.post("/transferir-stock")
 def transferir_stock(

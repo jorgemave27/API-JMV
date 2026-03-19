@@ -114,9 +114,7 @@ class ListarItemsHandler(BaseQueryHandler, QueryHandler[ListarItemsQuery, QueryL
         offset = (query.page - 1) * query.page_size
 
         rows = (
-            self.db.execute(
-                base_stmt.order_by(ItemLectura.id.asc()).offset(offset).limit(query.page_size)
-            )
+            self.db.execute(base_stmt.order_by(ItemLectura.id.asc()).offset(offset).limit(query.page_size))
             .scalars()
             .all()
         )
@@ -146,9 +144,7 @@ class BuscarItemsHandler(BaseQueryHandler, QueryHandler[BuscarItemsQuery, QueryL
             ItemLectura.name.ilike(f"%{safe_term}%"),
         ]
 
-        count_stmt = select(func.count()).select_from(
-            select(ItemLectura.id).where(*base_filter).subquery()
-        )
+        count_stmt = select(func.count()).select_from(select(ItemLectura.id).where(*base_filter).subquery())
         total = self.db.execute(count_stmt).scalar_one()
 
         offset = (query.page - 1) * query.page_size

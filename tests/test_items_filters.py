@@ -42,7 +42,9 @@ def test_filtro_precio_rango(client, auth_headers):
     create_item(client, auth_headers, name="Caja 50", price=50.0, stock=1, sku_prefix="RNG")
     create_item(client, auth_headers, name="Caja 70", price=70.0, stock=1, sku_prefix="RNG")
 
-    body = get_items_wrapped(client, auth_headers, "precio_min=40&precio_max=60&ordenar_por=precio_asc&page=1&page_size=10")
+    body = get_items_wrapped(
+        client, auth_headers, "precio_min=40&precio_max=60&ordenar_por=precio_asc&page=1&page_size=10"
+    )
     data = body["data"]
     assert data["total"] == 2
     prices = [x["price"] for x in data["items"]]

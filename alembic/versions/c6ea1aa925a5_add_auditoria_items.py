@@ -1,8 +1,8 @@
 """add auditoria_items (SQLITE SAFE + PROD READY)"""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "c6ea1aa925a5"
@@ -23,28 +23,20 @@ def upgrade() -> None:
     op.create_table(
         "auditoria_items",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
-
         # referencia al item
         sa.Column("item_id", sa.Integer(), nullable=False),
-
         # acción (CREATE, UPDATE, DELETE)
         sa.Column("accion", sa.String(length=20), nullable=False),
-
         # snapshots
         sa.Column("datos_anteriores", sa.JSON(), nullable=True),
         sa.Column("datos_nuevos", sa.JSON(), nullable=True),
-
         # usuario responsable (ajustado a tu modelo actual)
         sa.Column("usuario_id", sa.Integer(), nullable=True),
-
         # 🔥 eliminado "activo" (no lo estás usando en el modelo actual)
-
         # 🔥 timestamp SIN server_default (lo maneja Python)
         sa.Column("timestamp", sa.DateTime(), nullable=True),
-
         # 🔥 ip cliente
         sa.Column("ip_cliente", sa.String(length=64), nullable=True),
-
         # FK
         sa.ForeignKeyConstraint(["item_id"], ["items.id"], ondelete="CASCADE"),
     )

@@ -29,6 +29,7 @@ class CategoriaCreate(CategoriaBase):
     """
     Schema para crear una categoría.
     """
+
     pass
 
 

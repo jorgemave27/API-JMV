@@ -13,7 +13,6 @@ from sqlalchemy.orm import sessionmaker
 from app.core.security import hash_password
 from app.models.usuario import Usuario
 
-
 DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/api_jmv"
 
 engine = create_engine(DATABASE_URL)

@@ -37,6 +37,7 @@ RETENTION_YEARS = 3
 # Utilidades de anonimización
 # -------------------------------------------------------------
 
+
 def _sha256(value: str) -> str:
     """
     Genera hash irreversible SHA256.
@@ -77,6 +78,7 @@ def _anonimizar_rfc(rfc: str | None, usuario_id: int) -> str | None:
 # Job principal
 # -------------------------------------------------------------
 
+
 def ejecutar_retencion_datos() -> None:
     """
     Busca usuarios inactivos por más de 3 años
@@ -86,7 +88,6 @@ def ejecutar_retencion_datos() -> None:
     db: Session = SessionLocal()
 
     try:
-
         limite = datetime.utcnow() - timedelta(days=365 * RETENTION_YEARS)
 
         usuarios = (
@@ -104,7 +105,6 @@ def ejecutar_retencion_datos() -> None:
             return
 
         for usuario in usuarios:
-
             email_original = usuario.email
             nombre_original = usuario.nombre
             rfc_original = usuario.rfc

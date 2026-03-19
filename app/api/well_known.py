@@ -14,6 +14,7 @@ router = APIRouter()
 # SECURITY.TXT
 # ==========================================================
 
+
 @router.get(
     "/.well-known/security.txt",
     response_class=PlainTextResponse,
@@ -35,6 +36,7 @@ Policy: https://empresa.com/security-policy
 # ==========================================================
 # OPENID DISCOVERY
 # ==========================================================
+
 
 @router.get(
     "/.well-known/openid-configuration",

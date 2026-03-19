@@ -14,7 +14,6 @@ from sqlalchemy import text
 # IMPORT CRÍTICO PARA REGISTRAR MODELOS
 # =========================================================
 import app.models
-
 from app.core.config import settings
 from app.database.database import SessionLocal, engine
 from app.models.item import Item

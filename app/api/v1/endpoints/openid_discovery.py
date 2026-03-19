@@ -3,12 +3,8 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get(
-    "/.well-known/openid-configuration",
-    include_in_schema=False
-)
+@router.get("/.well-known/openid-configuration", include_in_schema=False)
 def openid_discovery():
-
     """
     Endpoint estándar de OpenID Connect.
 
@@ -23,5 +19,5 @@ def openid_discovery():
         "userinfo_endpoint": "https://api.empresa.com/oauth/userinfo",
         "response_types_supported": ["code"],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["RS256"]
+        "id_token_signing_alg_values_supported": ["RS256"],
     }

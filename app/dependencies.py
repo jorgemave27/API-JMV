@@ -1,9 +1,8 @@
-from fastapi import Header, HTTPException, status, Depends
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.repositories.item_repository import ItemRepository
-
 
 API_KEY = "mi-clave-secreta"
 

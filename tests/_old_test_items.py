@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.main import app
 from app.database.database import Base, get_db
+from app.main import app
 
 API_KEY = "dev-secret-key-change-me"
 
@@ -68,6 +68,7 @@ def client(setup_db):
 # Helpers
 # ------------------------
 
+
 def _auth_headers() -> dict[str, str]:
     return {"X-API-Key": API_KEY}
 
@@ -103,6 +104,7 @@ def _get_items(client: TestClient, query: str = "") -> dict:
 # ------------------------
 # Tests base (health + auth + CRUD)
 # ------------------------
+
 
 def test_health_ok(client):
     r = client.get("/health")
@@ -153,6 +155,7 @@ def test_list_items_ok_paginado(client):
 # Paginación (tarea previa) - ajustada a respuesta nueva
 # ------------------------
 
+
 def test_paginacion_page2_devuelve_5(client):
     for i in range(15):
         _create_item(client, name=f"caja pag {i}", price=10.5, stock=0, sku_prefix="PAG")
@@ -180,6 +183,7 @@ def test_codigo_sku_invalido_da_422(client):
 # ------------------------
 # Soft delete - ajustado a respuesta nueva
 # ------------------------
+
 
 def test_soft_delete_oculta_en_listado_y_aparece_en_eliminados(client):
     created = _create_item(client, name="caja soft", price=10.0, stock=1, sku_prefix="SOFT")
@@ -213,6 +217,7 @@ def test_restaurar_falla_si_item_no_esta_eliminado(client):
 # ------------------------
 # filtros + orden + creado_desde
 # ------------------------
+
 
 def test_filtro_nombre_y_orden_precio_desc(client):
     _create_item(client, name="Caja Premium", price=120.5, stock=10, sku_prefix="T10")

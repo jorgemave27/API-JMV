@@ -71,10 +71,7 @@ def test_tipo_cambio_resilience(
     current_user: Usuario = Depends(get_current_user),
     _: None = Depends(require_role("admin")),
 ):
-    url = (
-        f"{settings.RESILIENCE_MOCK_BASE_URL}"
-        f"?fail={'true' if fail else 'false'}&slow_seconds={slow_seconds}"
-    )
+    url = f"{settings.RESILIENCE_MOCK_BASE_URL}?fail={'true' if fail else 'false'}&slow_seconds={slow_seconds}"
 
     payload = get_external_data_with_resilience(
         service_name="tipo_cambio",

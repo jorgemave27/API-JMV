@@ -31,8 +31,7 @@ class StockInsuficienteError(Exception):
 
         # mensaje exacto usado por los tests
         self.message = (
-            f"No se puede marcar disponible=True para el item {item_id} "
-            f"porque su stock actual es {stock_actual}"
+            f"No se puede marcar disponible=True para el item {item_id} porque su stock actual es {stock_actual}"
         )
 
         # data que usan los tests

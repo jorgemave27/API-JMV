@@ -38,6 +38,7 @@ class EncryptedString(TypeDecorator):
     """
     TypeDecorator para cifrado transparente.
     """
+
     impl = TEXT
     cache_ok = True
 

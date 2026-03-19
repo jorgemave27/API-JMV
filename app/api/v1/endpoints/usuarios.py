@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_client_ip
-from app.core.security import hash_password, verify_api_key, require_role
+from app.core.security import hash_password, require_role, verify_api_key
 from app.database.database import get_db
 from app.models.consentimiento_privacidad import ConsentimientoPrivacidad
 from app.models.usuario import Usuario
@@ -172,9 +172,7 @@ def obtener_mis_datos(
 
     usuario = _get_usuario_or_404(db, usuario_id)
 
-    response.headers["Content-Disposition"] = (
-        f'attachment; filename="usuario_{usuario_id}_mis_datos.json"'
-    )
+    response.headers["Content-Disposition"] = f'attachment; filename="usuario_{usuario_id}_mis_datos.json"'
 
     data = UsuarioDatosPersonalesRead(
         id=usuario.id,
@@ -226,11 +224,7 @@ def rectificar_usuario(
     # Rectificación de email
     # -------------------------------------------------------------
     if payload.email is not None and payload.email != usuario.email:
-        email_duplicado = (
-            db.query(Usuario)
-            .filter(Usuario.email == payload.email, Usuario.id != usuario_id)
-            .first()
-        )
+        email_duplicado = db.query(Usuario).filter(Usuario.email == payload.email, Usuario.id != usuario_id).first()
         if email_duplicado:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

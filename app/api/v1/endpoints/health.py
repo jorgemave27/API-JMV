@@ -83,9 +83,7 @@ def healthcheck(db: Session = Depends(get_db)):
     else:
         all_ok = db_ok and redis_ok
 
-    response_status = (
-        status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE
-    )
+    response_status = status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE
 
     payload = {
         "status": "ok" if all_ok else "error",

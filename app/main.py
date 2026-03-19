@@ -3,90 +3,75 @@ from __future__ import annotations
 # =====================================================
 # IMPORTS
 # =====================================================
-
 import sentry_sdk
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-
 from prometheus_fastapi_instrumentator import Instrumentator
 from scalar_fastapi import get_scalar_api_reference
-
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 # -----------------------------------------------------
-# SENTRY
-# -----------------------------------------------------
-
-from app.core.sentry import init_sentry
-
-# -----------------------------------------------------
 # ROUTERS
 # -----------------------------------------------------
-
 from app.api.v1 import api_router_v1
+from app.api.v1.endpoints.debug import router as debug_router
+from app.api.v1.endpoints.health import router as health_router
+from app.api.v1.endpoints.operaciones import router as operaciones_router
+from app.api.v1.endpoints.usuarios import router as usuarios_router
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
-
-from app.api.v1.endpoints.operaciones import router as operaciones_router
-from app.api.v1.endpoints.health import router as health_router
-from app.api.v1.endpoints.usuarios import router as usuarios_router
-from app.api.v1.endpoints.debug import router as debug_router
-
-from app.routers.categorias import router as categorias_router
-from app.oauth.router import router as oauth_router
 
 # -----------------------------------------------------
 # CORE
 # -----------------------------------------------------
-
 from app.core.config import limiter, settings
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
 from app.core.logger import setup_logging
 
 # -----------------------------------------------------
+# SENTRY
+# -----------------------------------------------------
+from app.core.sentry import init_sentry
+
+# -----------------------------------------------------
 # DATABASE
 # -----------------------------------------------------
-
 from app.database.database import Base, SessionLocal, engine
 
 # -----------------------------------------------------
 # DISCOVERY
 # -----------------------------------------------------
-
 from app.discovery.consul_client import deregister_service, register_service
+from app.middleware.sentry_user import SentryUserMiddleware
 
 # -----------------------------------------------------
 # MIDDLEWARES
 # -----------------------------------------------------
-
 from app.middlewares.audit_context import AuditContextMiddleware
 from app.middlewares.auto_profiler import AutoProfilerMiddleware
 from app.middlewares.content_type_validation import ContentTypeValidationMiddleware
 from app.middlewares.dynamic_cors import DynamicCORSMiddleware
+from app.middlewares.elk_logging import ELKLoggingMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
+from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
-from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
-from app.middlewares.elk_logging import ELKLoggingMiddleware
-
-from app.middleware.sentry_user import SentryUserMiddleware
+from app.oauth.router import router as oauth_router
+from app.routers.categorias import router as categorias_router
 
 # -----------------------------------------------------
 # SERVICES
 # -----------------------------------------------------
-
 from app.services.metrics_service import (
     sync_active_items_gauge,
     sync_active_users_gauge,
 )
-
 
 # =====================================================
 # INIT SENTRY (ANTES DE TODO)
@@ -110,6 +95,7 @@ OPENAPI_TAGS = [
 # =====================================================
 # APP FACTORY
 # =====================================================
+
 
 def create_app() -> FastAPI:
     setup_logging()
@@ -211,10 +197,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
 
-        errores = [
-            f"{' -> '.join(map(str, err['loc']))}: {err['msg']}"
-            for err in exc.errors()
-        ]
+        errores = [f"{' -> '.join(map(str, err['loc']))}: {err['msg']}" for err in exc.errors()]
 
         request_id = getattr(request.state, "request_id", None)
 
@@ -289,12 +272,14 @@ def create_app() -> FastAPI:
 
     @app.get("/.well-known/security.txt", include_in_schema=False)
     async def security_txt():
-        return PlainTextResponse("""
+        return PlainTextResponse(
+            """
 Contact: mailto:security@empresa.com
 Expires: 2030-12-31T23:59:59.000Z
 Preferred-Languages: es,en
 Policy: https://empresa.com/security-policy
-""".strip())
+""".strip()
+        )
 
     # =================================================
     # ROUTERS

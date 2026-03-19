@@ -11,8 +11,8 @@ Este archivo garantiza que todos los modelos se carguen
 cuando se importe `app.models`.
 """
 
-from app.models.item import Item
-from app.models.categoria import Categoria
 from app.models.auditoria_item import AuditoriaItem
+from app.models.categoria import Categoria
+from app.models.item import Item
 
 # Si agregas más modelos en el futuro, agrégalos aquí

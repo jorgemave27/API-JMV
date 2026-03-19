@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.database.database import get_db
 from app.models.security_event import SecurityEvent
 
-
 router = APIRouter(
     prefix="/admin/security",
     tags=["Admin Security"],
@@ -23,12 +22,7 @@ def obtener_eventos_security(db: Session = Depends(get_db)):
     Retorna los últimos eventos de seguridad detectados.
     """
 
-    eventos = (
-        db.query(SecurityEvent)
-        .order_by(SecurityEvent.timestamp.desc())
-        .limit(100)
-        .all()
-    )
+    eventos = db.query(SecurityEvent).order_by(SecurityEvent.timestamp.desc()).limit(100).all()
 
     data = [
         {

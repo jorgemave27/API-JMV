@@ -18,6 +18,7 @@ router = APIRouter()
 # RFC 9116
 # =====================================================
 
+
 @router.get("/.well-known/security.txt", include_in_schema=False)
 async def security_txt():
 
@@ -35,6 +36,7 @@ Policy: https://empresa.com/security-policy
 # OPENID DISCOVERY
 # =====================================================
 
+
 @router.get("/.well-known/openid-configuration", include_in_schema=False)
 async def openid_configuration():
 
@@ -46,5 +48,5 @@ async def openid_configuration():
         "jwks_uri": "http://localhost:8000/.well-known/jwks.json",
         "response_types_supported": ["code"],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["HS256"]
+        "id_token_signing_alg_values_supported": ["HS256"],
     }

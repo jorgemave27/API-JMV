@@ -32,6 +32,7 @@ _current_client_ip: ContextVar[Optional[str]] = ContextVar(
 # Helpers para user_id
 # -------------------------------------------------------------------
 
+
 def set_current_user_id(user_id: Optional[int]) -> Token:
     """
     Guarda el user_id actual en el contexto del request.
@@ -59,6 +60,7 @@ def reset_current_user_id(token: Token) -> None:
 # -------------------------------------------------------------------
 # Helpers para client_ip
 # -------------------------------------------------------------------
+
 
 def set_current_client_ip(client_ip: Optional[str]) -> Token:
     """

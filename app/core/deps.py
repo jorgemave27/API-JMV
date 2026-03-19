@@ -15,4 +15,3 @@ def log_client_ip(request: Request) -> str:
     client_ip = request.client.host if request.client else "unknown"
     print(f"[IP] Cliente: {client_ip}")
     return client_ip
-

@@ -7,12 +7,12 @@ sin pedir login nuevamente.
 
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
+
 from app.database.database import Base
 
 
 class OAuthRefreshToken(Base):
-
     __tablename__ = "oauth_refresh_tokens"
 
     id = Column(Integer, primary_key=True)

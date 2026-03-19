@@ -9,6 +9,7 @@ class LoginRequest(BaseModel):
     """
     Schema para login.
     """
+
     email: EmailStr
     password: str
 
@@ -17,6 +18,7 @@ class TokenResponse(BaseModel):
     """
     Respuesta estándar de tokens JWT.
     """
+
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -26,6 +28,7 @@ class RefreshTokenRequest(BaseModel):
     """
     Schema para refrescar access token.
     """
+
     refresh_token: str
 
 
@@ -33,6 +36,7 @@ class TokenPayload(BaseModel):
     """
     Payload decodificado del JWT.
     """
+
     sub: str
     type: str
     exp: int
@@ -42,6 +46,7 @@ class UsuarioAuthRead(BaseModel):
     """
     Lectura segura de usuario autenticado.
     """
+
     id: int
     email: EmailStr
     activo: bool
@@ -54,6 +59,7 @@ class CambiarPasswordRequest(BaseModel):
     """
     Schema para cambio de contraseña autenticado.
     """
+
     current_password: str
     new_password: str = Field(..., min_length=8)
 
@@ -68,6 +74,7 @@ class ForgotPasswordRequest(BaseModel):
     """
     Schema para solicitar recuperación de contraseña.
     """
+
     email: EmailStr
 
 
@@ -75,6 +82,7 @@ class ResetPasswordRequest(BaseModel):
     """
     Schema para restablecer contraseña con token.
     """
+
     token: str
     new_password: str = Field(..., min_length=8)
 

@@ -1,8 +1,8 @@
 """crear tabla configuracion cors"""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "e0c73d37628a"

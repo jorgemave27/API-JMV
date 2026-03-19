@@ -26,7 +26,6 @@ def check_encryption():
 
 
 if __name__ == "__main__":
-
     print("Running security audit...\n")
 
     check_env()

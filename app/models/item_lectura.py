@@ -15,6 +15,7 @@ class ItemLectura(Base):
     Esta tabla NO se usa para escribir.
     Solo se usa para lecturas optimizadas.
     """
+
     __tablename__ = "items_lectura"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

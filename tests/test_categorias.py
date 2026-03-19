@@ -4,7 +4,6 @@ from typing import Any
 
 from tests.conftest import create_item
 
-
 BASE_CATEGORIAS = "/categorias"
 
 

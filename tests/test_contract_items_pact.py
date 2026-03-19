@@ -6,7 +6,6 @@ import pytest
 import requests
 from pact import Pact, match
 
-
 PACT_DIR = Path("tests/pacts")
 PACT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -16,8 +15,7 @@ def test_contract_listar_items():
     pact = Pact("frontend-web", "api-jmv").with_specification("V4")
 
     (
-        pact
-        .upon_receiving("una solicitud para listar items")
+        pact.upon_receiving("una solicitud para listar items")
         .given("existen items activos")
         .with_request(
             "GET",

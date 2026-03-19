@@ -27,10 +27,7 @@ class SQLInjectionWarningMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):
         super().__init__(app)
-        self._compiled_patterns = [
-            re.compile(pattern, re.IGNORECASE)
-            for pattern in self.SUSPICIOUS_PATTERNS
-        ]
+        self._compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_PATTERNS]
 
     async def dispatch(self, request: Request, call_next) -> Response:
         for key, value in request.query_params.multi_items():

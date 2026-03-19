@@ -17,10 +17,8 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 # Importar modelos relacionados antes de usar Item
 # para que SQLAlchemy resuelva correctamente relaciones.
 # -----------------------------------------------------
-from app.models.categoria import Categoria
-from app.models.item import Item
 from app.grpc import items_pb2, items_pb2_grpc
-
+from app.models.item import Item
 
 # -----------------------------------------------------
 # Engine / Session para gRPC server
@@ -66,11 +64,7 @@ class ItemServicer(items_pb2_grpc.ItemServiceServicer):
         """
         db = SessionLocal()
         try:
-            item = (
-                db.query(Item)
-                .filter(Item.id == request.item_id)
-                .first()
-            )
+            item = db.query(Item).filter(Item.id == request.item_id).first()
 
             if item is None:
                 context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -91,13 +85,7 @@ class ItemServicer(items_pb2_grpc.ItemServiceServicer):
             limit = request.limit or 10
             offset = request.offset or 0
 
-            items = (
-                db.query(Item)
-                .order_by(Item.id.asc())
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
+            items = db.query(Item).order_by(Item.id.asc()).offset(offset).limit(limit).all()
 
             for item in items:
                 yield _to_item_response(item)

@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
+from app.models.categoria import Categoria
 
 # ---------------------------------------------------------
 # IMPORTANTE:
@@ -18,7 +19,6 @@ from app.core.config import settings
 # que referencia "Item".
 # ---------------------------------------------------------
 from app.models.item import Item  # noqa: F401
-from app.models.categoria import Categoria
 from app.models.item_lectura import ItemLectura
 from app.services.operation_service import OperationService
 
@@ -46,11 +46,7 @@ def upsert_item_projection(payload: dict) -> None:
 
         categoria_nombre = payload.get("categoria_nombre")
         if categoria_nombre is None and categoria_id is not None:
-            categoria = (
-                db.execute(select(Categoria).where(Categoria.id == categoria_id))
-                .scalars()
-                .first()
-            )
+            categoria = db.execute(select(Categoria).where(Categoria.id == categoria_id)).scalars().first()
             categoria_nombre = categoria.nombre if categoria else None
 
         projection = db.get(ItemLectura, item_id)
@@ -71,15 +67,9 @@ def upsert_item_projection(payload: dict) -> None:
         projection.precio_con_impuesto = calcular_precio_con_impuesto(payload.get("price", 0.0))
         projection.eliminado = payload.get("eliminado", False)
         projection.eliminado_en = (
-            datetime.fromisoformat(payload["eliminado_en"])
-            if payload.get("eliminado_en")
-            else None
+            datetime.fromisoformat(payload["eliminado_en"]) if payload.get("eliminado_en") else None
         )
-        projection.created_at = (
-            datetime.fromisoformat(payload["created_at"])
-            if payload.get("created_at")
-            else None
-        )
+        projection.created_at = datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else None
         projection.actualizado_en = datetime.utcnow()
 
         db.commit()

@@ -17,9 +17,8 @@ from app.models.usuario import Usuario
 from app.queries.item_handlers import BuscarItemsHandler, ListarItemsHandler, ObtenerItemHandler
 from app.queries.items import BuscarItemsQuery, ListarItemsQuery, ObtenerItemQuery
 from app.schemas.base import ApiResponse
-from app.schemas.item import ItemRead
+from app.schemas.item import ItemCreate, ItemRead
 from app.schemas.pagination import PaginatedResponse
-from app.schemas.item import ItemCreate
 
 router = APIRouter()
 

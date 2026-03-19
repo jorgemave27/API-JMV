@@ -1,6 +1,6 @@
+import asyncio
 import sys
 from pathlib import Path
-import asyncio
 
 # -----------------------------------------------------
 # Agregar root del proyecto al PYTHONPATH

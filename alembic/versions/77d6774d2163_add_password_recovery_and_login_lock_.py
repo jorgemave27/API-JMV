@@ -1,8 +1,8 @@
 """add password recovery and login lock fields to usuarios"""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "77d6774d2163"
 down_revision = "c6ea1aa925a5"

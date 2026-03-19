@@ -43,7 +43,8 @@ def test_stock_insuficiente_handler_devuelve_409(client, auth_headers):
         sku_prefix="STK",
     )
 
-    r = client.put("/api/v1/items/bulk",
+    r = client.put(
+        "/api/v1/items/bulk",
         headers=auth_headers,
         json={"ids": [item["id"]], "disponible": True},
     )

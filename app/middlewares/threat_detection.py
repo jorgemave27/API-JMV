@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from urllib.parse import unquote
@@ -34,14 +33,12 @@ class ThreatDetectionMiddleware(BaseHTTPMiddleware):
         r"--",
         r";",
         r"(?i)\bselect\b.+\bfrom\b",
-
         # XSS
         r"(?i)<script.*?>.*?</script.*?>",
         r"(?i)javascript:",
         r"(?i)onerror\s*=",
         r"(?i)onload\s*=",
         r"(?i)<img.*?>",
-
         # Path traversal
         r"\.\./",
         r"\.\.\\",
@@ -51,10 +48,7 @@ class ThreatDetectionMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):
         super().__init__(app)
-        self._compiled_patterns = [
-            re.compile(pattern, re.IGNORECASE)
-            for pattern in self.SUSPICIOUS_PATTERNS
-        ]
+        self._compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SUSPICIOUS_PATTERNS]
 
     def _contains_suspicious_pattern(self, text: str) -> bool:
         decoded = unquote(text)

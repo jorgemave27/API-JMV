@@ -11,7 +11,6 @@ from slowapi.util import get_remote_address
 
 from app.core.vault import vault_client
 
-
 APP_ENV = os.getenv("APP_ENV", "development")
 
 
@@ -51,6 +50,7 @@ except Exception:
 # Rate limiting
 # =====================================================
 
+
 def rate_limit_key_func(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
 
@@ -85,8 +85,8 @@ limiter = Limiter(key_func=rate_limit_key_func)
 # Settings
 # =====================================================
 
-class Settings(BaseSettings):
 
+class Settings(BaseSettings):
     # -------------------------------------------------
     # Core
     # -------------------------------------------------
@@ -229,6 +229,7 @@ class Settings(BaseSettings):
 # =====================================================
 # Singleton
 # =====================================================
+
 
 @lru_cache
 def get_settings() -> Settings:

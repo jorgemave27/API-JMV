@@ -7,7 +7,6 @@ from __future__ import annotations
 # - Si Redis falla, NO rompe la app
 # - Incluye detección de token theft
 # =====================================================
-
 import logging
 
 from app.core.config import settings
@@ -24,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class AnomalyDetector:
-
     def __init__(self) -> None:
 
         self.enabled = True
@@ -105,7 +103,6 @@ class AnomalyDetector:
             return
 
         try:
-
             key = self._key_401(ip)
             current = self.redis_client.incr(key)
 
@@ -128,7 +125,6 @@ class AnomalyDetector:
             return
 
         try:
-
             key = self._key_req(ip)
             current = self.redis_client.incr(key)
 
@@ -151,7 +147,6 @@ class AnomalyDetector:
             return
 
         try:
-
             key = self._key_404(ip)
 
             self.redis_client.sadd(key, path)
@@ -177,7 +172,6 @@ class AnomalyDetector:
         key = self._key_token_ip(jti)
 
         try:
-
             stored_ip = self.redis_client.get(key)
 
             if stored_ip is None:
@@ -185,7 +179,6 @@ class AnomalyDetector:
                 return False
 
             if stored_ip != ip:
-
                 logger.warning(
                     "SECURITY_EVENT posible_robo_token jti=%s ip1=%s ip2=%s",
                     jti,

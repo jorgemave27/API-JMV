@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.conftest import create_item, get_deleted_wrapped, get_items_wrapped, request_id_from, unwrap, rand_sku
+from tests.conftest import create_item, get_deleted_wrapped, get_items_wrapped, rand_sku, request_id_from, unwrap
 
 
 def test_health_ok(client):

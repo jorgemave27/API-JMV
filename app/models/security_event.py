@@ -8,8 +8,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String, Text
-from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
 
 from app.database.database import Base
 

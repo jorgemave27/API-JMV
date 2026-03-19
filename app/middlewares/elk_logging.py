@@ -14,7 +14,6 @@ from app.core.logger import logger
 
 
 class ELKLoggingMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(self, request: Request, call_next):
 
         start_time = time.time()

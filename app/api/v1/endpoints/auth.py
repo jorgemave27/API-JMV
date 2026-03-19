@@ -22,12 +22,6 @@ from app.core.security import (
     reset_failed_login_attempts,
     verify_password,
 )
-from app.security.token_blacklist import (
-    blacklist_token,
-    close_session,
-    get_user_sessions,
-    revoke_all_user_tokens,
-)
 from app.database.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.auth import (
@@ -37,6 +31,12 @@ from app.schemas.auth import (
     RefreshTokenRequest,
     ResetPasswordRequest,
     TokenResponse,
+)
+from app.security.token_blacklist import (
+    blacklist_token,
+    close_session,
+    get_user_sessions,
+    revoke_all_user_tokens,
 )
 
 router = APIRouter()
@@ -334,9 +334,7 @@ def forgot_password(
     raw_token = generate_password_reset_token()
 
     user.reset_token_hash = hash_reset_token(raw_token)
-    user.reset_token_expires_at = datetime.utcnow() + timedelta(
-        hours=RESET_TOKEN_EXPIRE_HOURS
-    )
+    user.reset_token_expires_at = datetime.utcnow() + timedelta(hours=RESET_TOKEN_EXPIRE_HOURS)
     user.reset_token_used_at = None
 
     db.add(user)

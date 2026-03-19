@@ -1,6 +1,7 @@
-from pyinstrument import Profiler
 from fastapi import Request
+from pyinstrument import Profiler
 from starlette.responses import HTMLResponse
+
 from app.core.config import get_settings
 
 settings = get_settings()

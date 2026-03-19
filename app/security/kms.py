@@ -137,9 +137,7 @@ def encrypt_with_envelope(plaintext: str) -> str:
         "ct": encrypted_payload,
     }
 
-    return base64.b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
-    ).decode()
+    return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
 
 def decrypt_with_envelope(ciphertext: str) -> str:

@@ -89,6 +89,7 @@ ACTIVE_USERS_GAUGE = Gauge(
 # HELPERS
 # =====================================================
 
+
 def increment_crud_operation(
     entity: str,
     operation: str,

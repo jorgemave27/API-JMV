@@ -14,7 +14,6 @@ from __future__ import annotations
 # Si no excluimos esos escenarios, el detector termina
 # bloqueando todas las requests del suite de pytest.
 # =====================================================
-
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -55,11 +54,7 @@ class SecurityAnomalyMiddleware(BaseHTTPMiddleware):
         # OBTENER IP REAL
         # -------------------------------------------------
         forwarded_for = request.headers.get("x-forwarded-for")
-        ip = (
-            forwarded_for.split(",")[0].strip()
-            if forwarded_for
-            else (client_host or "unknown")
-        )
+        ip = forwarded_for.split(",")[0].strip() if forwarded_for else (client_host or "unknown")
 
         # -------------------------------------------------
         # SI LA IP YA ESTÁ BLOQUEADA, CORTAR REQUEST

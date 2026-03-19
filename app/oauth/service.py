@@ -20,7 +20,6 @@ from app.core.security import create_access_token
 from app.models.oauth_refresh_token import OAuthRefreshToken
 from app.models.usuario import Usuario
 
-
 # conexión Redis existente en tu proyecto
 redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
@@ -97,9 +96,7 @@ def revoke_refresh_token(db: Session, token: str):
     Revoca refresh token.
     """
 
-    obj = db.query(OAuthRefreshToken).filter(
-        OAuthRefreshToken.token == token
-    ).first()
+    obj = db.query(OAuthRefreshToken).filter(OAuthRefreshToken.token == token).first()
 
     if obj:
         obj.revoked = True
