@@ -95,39 +95,59 @@ jobs:
   # ==========================================================
   test-integration:
     runs-on: ubuntu-latest
-    needs: build # Solo corre si build pasó
+    needs: build
 
     steps:
+      # Clona el repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Descarga la imagen recién construida
+      # Descarga la imagen recién construida desde GHCR
       - name: Pull latest image
         run: |
           docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
 
-      # Levanta todo el entorno con Docker Compose
+      # Levanta SOLO servicios mínimos para la prueba:
+      # db + redis + api
       - name: Run docker compose
         run: |
-          docker compose -f docker-compose.yml up -d
+          docker compose -f docker-compose.yml up -d db redis api
 
-      # Espera a que la API arranque
-      - name: Wait API
+      # Muestra estado de contenedores
+      - name: Show containers status
         run: |
-          sleep 20
+          docker compose -f docker-compose.yml ps
 
-      # Smoke tests básicos
+      # Espera activamente a que la API responda
+      # Reintenta hasta 60 segundos
+      - name: Wait for API health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health; then
+              echo "✅ API levantó correctamente"
+              exit 0
+            fi
+            echo "⏳ Esperando API... intento $i/30"
+            sleep 2
+          done
+
+          echo "❌ La API no respondió a tiempo"
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs api db redis --tail=200
+          exit 1
+
+      # Smoke tests básicos ya con API arriba
       - name: Smoke test basic endpoints
         run: |
           curl --fail http://localhost:8000/health
           curl --fail http://localhost:8000/api/v1/health
 
-      # Si algo falla, imprime logs
+      # Si algo falla después, imprime logs
       - name: Show logs on failure
         if: failure()
         run: |
           docker compose -f docker-compose.yml ps
-          docker compose -f docker-compose.yml logs --tail=200
+          docker compose -f docker-compose.yml logs api db redis --tail=200
 
   # ==========================================================
   # JOB 4: DEPLOY A STAGING
