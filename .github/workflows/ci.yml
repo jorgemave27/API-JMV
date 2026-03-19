@@ -8,7 +8,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/api-jmv
 
 jobs:
   # =========================
@@ -86,7 +86,7 @@ jobs:
 
       - name: Pull latest image
         run: |
-          docker pull ghcr.io/${{ github.repository }}:latest
+          docker pull ghcr.io/jorgemave27/api-jmv:latest
 
       - name: Run docker-compose
         run: |
