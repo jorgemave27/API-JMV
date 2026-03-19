@@ -1,0 +1,7 @@
+region             = "us-east-1"
+env                = "dev"
+db_instance_class  = "db.t3.micro"
+redis_node_type    = "cache.t3.micro"
+db_name            = "apijmv"
+db_username        = "postgres"
+db_password        = "CHANGE_ME_IN_MASTER_ACCOUNT"

@@ -1,0 +1,7 @@
+region             = "us-east-1"
+env                = "prod"
+db_instance_class  = "db.t3.small"
+redis_node_type    = "cache.t3.small"
+db_name            = "apijmv"
+db_username        = "postgres"
+db_password        = "CHANGE_ME_IN_MASTER_ACCOUNT"
