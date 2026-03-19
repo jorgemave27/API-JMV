@@ -20,6 +20,7 @@ from app.api.v1 import api_router_v1
 from app.api.v1.endpoints.debug import router as debug_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.operaciones import router as operaciones_router
+from app.api.v1.endpoints.sagas import router as sagas_router
 from app.api.v1.endpoints.usuarios import router as usuarios_router
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
@@ -40,6 +41,12 @@ from app.core.sentry import init_sentry
 # DATABASE
 # -----------------------------------------------------
 from app.database.database import Base, SessionLocal, engine
+
+# -----------------------------------------------------
+# MODELOS NUEVOS DE SAGA
+# -----------------------------------------------------
+from app.models.pedido import Pedido  # noqa: F401
+from app.models.saga_log import SagaLog  # noqa: F401
 
 # -----------------------------------------------------
 # DISCOVERY
@@ -89,6 +96,7 @@ OPENAPI_TAGS = [
     {"name": "Auth", "description": "Autenticación JWT"},
     {"name": "Health", "description": "Healthchecks del sistema"},
     {"name": "Usuarios", "description": "Gestión de usuarios y derechos ARCO"},
+    {"name": "Sagas", "description": "Sagas para transacciones distribuidas"},
 ]
 
 
@@ -196,9 +204,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-
         errores = [f"{' -> '.join(map(str, err['loc']))}: {err['msg']}" for err in exc.errors()]
-
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -213,7 +219,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -228,7 +233,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ItemNoEncontradoError)
     async def item_no_encontrado_handler(request: Request, exc: ItemNoEncontradoError):
-
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -243,7 +247,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(StockInsuficienteError)
     async def stock_handler(request: Request, exc: StockInsuficienteError):
-
         request_id = getattr(request.state, "request_id", None)
 
         return JSONResponse(
@@ -291,7 +294,7 @@ Policy: https://empresa.com/security-policy
     app.include_router(api_router_v1, prefix="/api/v1")
     app.include_router(api_router_v2, prefix="/api/v2")
     app.include_router(operaciones_router, prefix="/api/v1")
-
+    app.include_router(sagas_router, prefix="/api/v1")
     app.include_router(usuarios_router, prefix="/api/v1/usuarios", tags=["Usuarios"])
     app.include_router(oauth_router)
     app.include_router(debug_router, prefix="/debug", tags=["debug"])
