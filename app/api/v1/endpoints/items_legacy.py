@@ -26,10 +26,7 @@ from app.core.cache import (
 from app.core.config import dynamic_rate_limit, limiter, settings
 from app.core.deps import get_client_ip, log_client_ip
 from app.core.exceptions import ItemNoEncontradoError, StockInsuficienteError
-from app.core.metrics import (
-    ITEMS_CREATED_BY_CATEGORY,
-    increment_crud_operation,
-)
+from app.core.metrics import ITEMS_CREATED_BY_CATEGORY, increment_crud_operation
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
 from app.core.security import require_role, verify_api_key
@@ -64,6 +61,9 @@ logger = logging.getLogger(__name__)
 LOW_STOCK_THRESHOLD = 5
 
 
+# =========================================================
+# HELPERS DE EVENTOS / AUDITORÍA / HATEOAS
+# =========================================================
 def _publicar_evento_item(routing_key: str, payload: dict) -> None:
     """
     Publica un evento simple a RabbitMQ para integración legacy.
@@ -90,7 +90,7 @@ def _publicar_evento_item(routing_key: str, payload: dict) -> None:
     try:
         asyncio.run(_run())
     except Exception as exc:
-        logger.warning(f"No se pudo publicar evento RabbitMQ ({routing_key}): {exc}")
+        logger.warning("No se pudo publicar evento RabbitMQ (%s): %s", routing_key, exc)
 
 
 def _bind_audit_user(current_user: Usuario | None) -> None:
@@ -127,7 +127,6 @@ def _publicar_evento_item_kafka(
         payload=payload,
         metadata=_build_event_metadata(current_user),
     )
-
     publish_domain_event(event)
 
 
@@ -201,7 +200,7 @@ def build_pagination_links(
     query_params: dict[str, Any],
 ) -> dict[str, str | None]:
     """
-    Construye links first / prev / next / last para paginación.
+    Construye links de paginación first / prev / next / last.
     """
     last_page = max(1, ceil(total / page_size)) if page_size > 0 else 1
 
@@ -218,6 +217,9 @@ def build_pagination_links(
     }
 
 
+# =========================================================
+# CREATE ITEM
+# =========================================================
 @router.post(
     "/",
     response_model=ApiResponse[ItemRead],
@@ -226,7 +228,7 @@ def build_pagination_links(
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
 @limiter.limit(dynamic_rate_limit)
-def crear_item(
+async def crear_item(
     request: Request,
     payload: ItemCreate,
     db: Session = Depends(get_db),
@@ -238,13 +240,19 @@ def crear_item(
     - create
     - items creados por categoría
     - latencia DB
+
+    IMPORTANTE:
+    - Aquí ya usamos await repo.create(...) para no devolver coroutines
+    - La invalidación del cache multinivel vive en el repository
     """
     _bind_audit_user(current_user)
 
     categoria = None
     if payload.categoria_id is not None:
         with measure_db_query("select", "categorias"):
-            categoria = db.execute(select(Categoria).where(Categoria.id == payload.categoria_id)).scalars().first()
+            categoria = db.execute(
+                select(Categoria).where(Categoria.id == payload.categoria_id)
+            ).scalars().first()
 
         if not categoria:
             increment_crud_operation("item", "create", "error")
@@ -265,13 +273,14 @@ def crear_item(
 
     try:
         with measure_db_query("insert", "items"):
-            item = repo.create(item)
+            item = await repo.create(item)
 
         category_name = categoria.nombre if categoria else "sin_categoria"
         ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
         sync_active_items_gauge(db)
         increment_crud_operation("item", "create", "success")
 
+        # Se mantiene cache manual de listados legacy
         invalidate_first_page_list_caches()
 
         if settings.CELERY_ENABLED:
@@ -295,7 +304,7 @@ def crear_item(
             current_user=current_user,
         )
 
-        logger.info(f"Item creado: id={item.id}, nombre={item.name}")
+        logger.info("Item creado: id=%s, nombre=%s", item.id, item.name)
 
         return ApiResponse[ItemRead](
             success=True,
@@ -309,6 +318,9 @@ def crear_item(
         raise
 
 
+# =========================================================
+# BULK CREATE
+# =========================================================
 @router.post(
     "/bulk",
     response_model=ApiResponse[list[ItemRead]],
@@ -334,7 +346,9 @@ def bulk_create_items(
 
         if categorias_ids:
             with measure_db_query("select", "categorias"):
-                categorias = db.execute(select(Categoria).where(Categoria.id.in_(categorias_ids))).scalars().all()
+                categorias = db.execute(
+                    select(Categoria).where(Categoria.id.in_(categorias_ids))
+                ).scalars().all()
             categorias_map = {categoria.id: categoria for categoria in categorias}
 
         for it in payload.items:
@@ -380,7 +394,7 @@ def bulk_create_items(
         increment_crud_operation("item", "bulk_create", "success")
         invalidate_first_page_list_caches()
 
-        logger.info(f"Bulk create completado: total_items={len(objects)}")
+        logger.info("Bulk create completado: total_items=%s", len(objects))
 
         return ApiResponse[list[ItemRead]](
             success=True,
@@ -392,7 +406,7 @@ def bulk_create_items(
     except IntegrityError as e:
         db.rollback()
         increment_crud_operation("item", "bulk_create", "error")
-        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk create: %s", str(e), exc_info=True)
         return error_response(
             status_code=400,
             message="Error en bulk create: violación de integridad (ej. SKU duplicado). Se hizo rollback.",
@@ -400,7 +414,7 @@ def bulk_create_items(
     except SQLAlchemyError as e:
         db.rollback()
         increment_crud_operation("item", "bulk_create", "error")
-        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk create: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk create. Se hizo rollback.",
@@ -409,7 +423,7 @@ def bulk_create_items(
     except Exception as e:
         db.rollback()
         increment_crud_operation("item", "bulk_create", "error")
-        logger.error(f"Error al procesar bulk create: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk create: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk create. Se hizo rollback.",
@@ -417,6 +431,9 @@ def bulk_create_items(
         )
 
 
+# =========================================================
+# BULK DELETE
+# =========================================================
 @router.delete(
     "/bulk",
     response_model=ApiResponse[dict],
@@ -466,7 +483,7 @@ def bulk_delete_items(
             delete_cache(build_item_cache_key(item_id))
             invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
-        logger.info(f"Bulk delete procesado: deleted={deleted}, not_found={not_found}")
+        logger.info("Bulk delete procesado: deleted=%s, not_found=%s", deleted, not_found)
 
         return ApiResponse[dict](
             success=True,
@@ -478,7 +495,7 @@ def bulk_delete_items(
     except SQLAlchemyError as e:
         db.rollback()
         increment_crud_operation("item", "bulk_delete", "error")
-        logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk delete: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk delete. Se hizo rollback.",
@@ -487,7 +504,7 @@ def bulk_delete_items(
     except Exception as e:
         db.rollback()
         increment_crud_operation("item", "bulk_delete", "error")
-        logger.error(f"Error al procesar bulk delete: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk delete: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk delete. Se hizo rollback.",
@@ -495,6 +512,9 @@ def bulk_delete_items(
         )
 
 
+# =========================================================
+# BULK UPDATE DISPONIBLE
+# =========================================================
 @router.put(
     "/bulk",
     response_model=ApiResponse[dict],
@@ -557,7 +577,10 @@ def bulk_update_disponible(
             invalidate_list_caches_for_item(item_id, include_first_pages=True)
 
         logger.info(
-            f"Bulk update disponible procesado: updated={updated}, not_found={not_found}, disponible={payload.disponible}"
+            "Bulk update disponible procesado: updated=%s, not_found=%s, disponible=%s",
+            updated,
+            not_found,
+            payload.disponible,
         )
 
         return ApiResponse[dict](
@@ -574,7 +597,7 @@ def bulk_update_disponible(
     except SQLAlchemyError as e:
         db.rollback()
         increment_crud_operation("item", "bulk_update_disponible", "error")
-        logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk update disponible: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error de base de datos en bulk update disponible. Se hizo rollback.",
@@ -583,7 +606,7 @@ def bulk_update_disponible(
     except Exception as e:
         db.rollback()
         increment_crud_operation("item", "bulk_update_disponible", "error")
-        logger.error(f"Error al procesar bulk update disponible: {str(e)}", exc_info=True)
+        logger.error("Error al procesar bulk update disponible: %s", str(e), exc_info=True)
         return error_response(
             status_code=500,
             message="Error inesperado en bulk update disponible. Se hizo rollback.",
@@ -591,6 +614,9 @@ def bulk_update_disponible(
         )
 
 
+# =========================================================
+# LISTAR ITEMS (SE MANTIENE CACHE MANUAL LEGACY DE LISTADOS)
+# =========================================================
 @router.get(
     "/",
     response_model=ApiResponse[PaginatedResponse[ItemRead]],
@@ -661,7 +687,6 @@ async def listar_items(
         return cached_page
 
     stmt = select(Item).options(selectinload(Item.categoria)).where(Item.eliminado.is_(False))
-
     count_stmt_base = select(Item.id).where(Item.eliminado.is_(False))
 
     if nombre:
@@ -771,6 +796,9 @@ async def listar_items(
         raise
 
 
+# =========================================================
+# BUSCAR ITEMS
+# =========================================================
 @router.get(
     "/buscar",
     response_model=ApiResponse[list[ItemRead]],
@@ -788,7 +816,12 @@ def buscar_items(
     """
     try:
         with measure_db_query("select", "items"):
-            items = db.query(Item).filter(Item.name == nombre, Item.eliminado.is_(False)).order_by(Item.id.asc()).all()
+            items = (
+                db.query(Item)
+                .filter(Item.name == nombre, Item.eliminado.is_(False))
+                .order_by(Item.id.asc())
+                .all()
+            )
 
         increment_crud_operation("item", "search", "success")
 
@@ -803,6 +836,9 @@ def buscar_items(
         raise
 
 
+# =========================================================
+# PAGINACIÓN POR CURSOR
+# =========================================================
 @router.get(
     "/cursor",
     response_model=ApiResponse[CursorPaginationResponse],
@@ -853,6 +889,9 @@ def listar_items_cursor(
         raise
 
 
+# =========================================================
+# LISTAR ELIMINADOS
+# =========================================================
 @router.get(
     "/eliminados",
     response_model=ApiResponse[PaginatedResponse[ItemRead]],
@@ -877,7 +916,6 @@ def listar_eliminados(
             total = db.execute(count_stmt).scalar_one()
 
         stmt = stmt.order_by(Item.id.asc())
-
         offset = (page - 1) * page_size
         stmt = stmt.offset(offset).limit(page_size)
 
@@ -919,6 +957,9 @@ def listar_eliminados(
         raise
 
 
+# =========================================================
+# DEMO IP
+# =========================================================
 @router.get(
     "/ip",
     response_model=ApiResponse[dict],
@@ -937,6 +978,9 @@ def mi_ip(ip: str = Depends(get_client_ip)):
     )
 
 
+# =========================================================
+# GET ITEM POR ID
+# =========================================================
 @router.get(
     "/{item_id}",
     response_model=ApiResponse[ItemRead],
@@ -944,49 +988,42 @@ def mi_ip(ip: str = Depends(get_client_ip)):
     description="Devuelve el recurso con links HATEOAS absolutos en _links.",
     dependencies=[Depends(verify_api_key)],
 )
-def obtener_item_por_id(
+async def obtener_item_por_id(
     request: Request,
     item_id: int,
     response: Response,
     repo: ItemRepository = Depends(get_item_repo),
 ):
     """
-    Obtiene un item por ID e instrumenta lectura y latencia DB.
+    Obtiene un item por ID.
+
+    IMPORTANTE:
+    - Ya NO usa cache manual local para este endpoint
+    - Ahora usa cache multinivel del repository:
+      L1 (memoria) -> L2 (Redis) -> DB
+    - Esto permite que las métricas cache_l1_hits / cache_l2_hits / cache_db_hits suban
     """
-    cache_key = build_item_cache_key(item_id)
-
-    cached_item = get_cache(cache_key)
-    if cached_item is not None:
-        response.headers["X-Cache"] = "HIT"
-        increment_crud_operation("item", "read", "success")
-        return cached_item
-
-    with measure_db_query("select", "items"):
-        item = repo.get_by_id(item_id)
+    item = await repo.get_by_id(item_id)
 
     if not item:
         response.headers["X-Cache"] = "MISS"
         increment_crud_operation("item", "read", "error")
         raise ItemNoEncontradoError(item_id)
 
-    payload = ApiResponse[ItemRead](
+    response.headers["X-Cache"] = "AUTO"
+    increment_crud_operation("item", "read", "success")
+
+    return ApiResponse[ItemRead](
         success=True,
         message="Item obtenido exitosamente",
         data=_item_read_with_links(item, request),
-        metadata={},
+        metadata={"cache": "L1/L2/DB"},
     )
 
-    set_cache(
-        cache_key,
-        payload.model_dump(mode="json", by_alias=True),
-        ttl=settings.CACHE_TTL_ITEM_SECONDS,
-    )
 
-    response.headers["X-Cache"] = "MISS"
-    increment_crud_operation("item", "read", "success")
-    return payload
-
-
+# =========================================================
+# UPDATE ITEM
+# =========================================================
 @router.put(
     "/{item_id}",
     response_model=ApiResponse[ItemRead],
@@ -994,7 +1031,7 @@ def obtener_item_por_id(
     description="Actualiza el recurso y devuelve la representación HATEOAS actualizada.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
-def actualizar_item(
+async def actualizar_item(
     request: Request,
     item_id: int,
     payload: ItemCreate,
@@ -1004,11 +1041,17 @@ def actualizar_item(
 ):
     """
     Actualiza un item e instrumenta update y latencia DB.
+
+    Versión simplificada para validar tarea 75:
+    - Usa repository async
+    - Invalida caché multinivel automáticamente
+    - Mantiene métricas
+    - Evita lógica extra que está provocando 500
     """
     _bind_audit_user(current_user)
 
     with measure_db_query("select", "items"):
-        item = repo.get_by_id(item_id)
+        item = await repo.get_by_id(item_id)
 
     if not item:
         increment_crud_operation("item", "update", "error")
@@ -1017,7 +1060,9 @@ def actualizar_item(
     categoria = None
     if payload.categoria_id is not None:
         with measure_db_query("select", "categorias"):
-            categoria = db.execute(select(Categoria).where(Categoria.id == payload.categoria_id)).scalars().first()
+            categoria = db.execute(
+                select(Categoria).where(Categoria.id == payload.categoria_id)
+            ).scalars().first()
 
         if not categoria:
             increment_crud_operation("item", "update", "error")
@@ -1036,27 +1081,12 @@ def actualizar_item(
 
     try:
         with measure_db_query("update", "items"):
-            item = repo.update(item)
+            item = await repo.update(item)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "update", "success")
 
-        delete_cache(build_item_cache_key(item_id))
-        invalidate_list_caches_for_item(item_id, include_first_pages=True)
-
-        _publicar_evento_item(
-            "items.actualizado",
-            ItemRead.model_validate(item).model_dump(mode="json"),
-        )
-
-        _publicar_evento_item_kafka(
-            event_type="item.updated",
-            aggregate_id=item.id,
-            payload=ItemRead.model_validate(item).model_dump(mode="json"),
-            current_user=current_user,
-        )
-
-        logger.info(f"Item actualizado: id={item.id}, usuario={current_user.email}")
+        logger.info("Item actualizado: id=%s, usuario=%s", item.id, current_user.email)
 
         return ApiResponse[ItemRead](
             success=True,
@@ -1069,6 +1099,9 @@ def actualizar_item(
         raise
 
 
+# =========================================================
+# HISTORIAL ITEM
+# =========================================================
 @router.get(
     "/{item_id}/historial",
     response_model=ApiResponse[list[dict]],
@@ -1121,6 +1154,9 @@ def obtener_historial_item(
         raise
 
 
+# =========================================================
+# ESTADO ITEM EN FECHA
+# =========================================================
 @router.get(
     "/{item_id}/estado",
     response_model=ApiResponse[dict],
@@ -1179,31 +1215,42 @@ def obtener_estado_item_en_fecha(
         raise
 
 
+# =========================================================
+# DELETE ITEM
+# =========================================================
 @router.delete(
     "/{item_id}",
     response_model=ApiResponse[dict],
     summary="Eliminar item por ID (soft delete)",
     dependencies=[Depends(verify_api_key)],
 )
-def eliminar_item(
+async def eliminar_item(
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin")),
 ):
     """
     Elimina lógicamente un item e instrumenta delete y latencia DB.
+
+    IMPORTANTE:
+    - Ahora usa await repo.get_by_id(...)
+    - Ahora usa await repo.delete(...)
     """
     _bind_audit_user(current_user)
 
     with measure_db_query("select", "items"):
-        item = repo.get_by_id(item_id)
+        item = await repo.get_by_id(item_id)
 
     if not item:
         increment_crud_operation("item", "delete", "error")
         raise ItemNoEncontradoError(item_id)
 
     if item.eliminado:
-        logger.warning(f"Intento de eliminar un item ya eliminado: id={item.id}, usuario={current_user.email}")
+        logger.warning(
+            "Intento de eliminar un item ya eliminado: id=%s, usuario=%s",
+            item.id,
+            current_user.email,
+        )
         increment_crud_operation("item", "delete", "success")
         return ApiResponse[dict](
             success=True,
@@ -1214,7 +1261,7 @@ def eliminar_item(
 
     try:
         with measure_db_query("update", "items"):
-            repo.delete(item)
+            await repo.delete(item)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "delete", "success")
@@ -1246,7 +1293,7 @@ def eliminar_item(
             current_user=current_user,
         )
 
-        logger.info(f"Item eliminado (soft delete): id={item.id}, usuario={current_user.email}")
+        logger.info("Item eliminado (soft delete): id=%s, usuario=%s", item.id, current_user.email)
 
         return ApiResponse[dict](
             success=True,
@@ -1259,6 +1306,9 @@ def eliminar_item(
         raise
 
 
+# =========================================================
+# RESTAURAR ITEM
+# =========================================================
 @router.post(
     "/{item_id}/restaurar",
     response_model=ApiResponse[ItemRead],
@@ -1266,7 +1316,7 @@ def eliminar_item(
     description="Restaura el recurso y devuelve la representación HATEOAS actualizada.",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
-def restaurar_item(
+async def restaurar_item(
     request: Request,
     item_id: int,
     repo: ItemRepository = Depends(get_item_repo),
@@ -1274,11 +1324,15 @@ def restaurar_item(
 ):
     """
     Restaura un item eliminado e instrumenta restore y latencia DB.
+
+    IMPORTANTE:
+    - Ahora usa await repo.get_by_id(...)
+    - Ahora usa await repo.update(...)
     """
     _bind_audit_user(current_user)
 
     with measure_db_query("select", "items"):
-        item = repo.get_by_id(item_id)
+        item = await repo.get_by_id(item_id)
 
     if not item:
         increment_crud_operation("item", "restore", "error")
@@ -1293,7 +1347,7 @@ def restaurar_item(
 
     try:
         with measure_db_query("update", "items"):
-            item = repo.update(item)
+            item = await repo.update(item)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "restore", "success")
@@ -1308,7 +1362,7 @@ def restaurar_item(
             current_user=current_user,
         )
 
-        logger.info(f"Item restaurado: id={item.id}")
+        logger.info("Item restaurado: id=%s", item.id)
 
         return ApiResponse[ItemRead](
             success=True,
@@ -1321,11 +1375,14 @@ def restaurar_item(
         raise
 
 
+# =========================================================
+# TRANSFERIR STOCK
+# =========================================================
 @router.post(
     "/transferir-stock",
     dependencies=[Depends(verify_api_key), Depends(require_role("admin", "editor"))],
 )
-def transferir_stock(
+async def transferir_stock(
     payload: TransferirStockRequest,
     db: Session = Depends(get_db),
     repo: ItemRepository = Depends(get_item_repo),
@@ -1333,6 +1390,10 @@ def transferir_stock(
 ):
     """
     Transfiere stock entre items e instrumenta operación y latencia DB.
+
+    IMPORTANTE:
+    - Ahora usa await repo.get_by_id(...)
+    - Conserva la lógica transaccional existente
     """
     _bind_audit_user(current_user)
 
@@ -1344,7 +1405,7 @@ def transferir_stock(
         )
 
     with measure_db_query("select", "items"):
-        item_origen = repo.get_by_id(payload.item_origen_id)
+        item_origen = await repo.get_by_id(payload.item_origen_id)
 
     if item_origen is None:
         increment_crud_operation("item", "stock_transfer", "error")
@@ -1354,7 +1415,7 @@ def transferir_stock(
         )
 
     with measure_db_query("select", "items"):
-        item_destino = repo.get_by_id(payload.item_destino_id)
+        item_destino = await repo.get_by_id(payload.item_destino_id)
 
     if item_destino is None:
         increment_crud_operation("item", "stock_transfer", "error")

@@ -1,0 +1,10 @@
+groups:
+  - name: cache-alerts
+    rules:
+      - alert: LowRedisHitRate
+        expr: rate(cache_l2_hits[5m]) < 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis hit rate bajo (<80%)"
