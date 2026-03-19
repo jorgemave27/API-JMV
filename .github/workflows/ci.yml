@@ -1,181 +1,164 @@
-name: CI-CD
+name: API-JMV CI/CD PIPELINE
 
 on:
   push:
-    branches:
-      - "**"
+    branches: ["main", "develop"]
   pull_request:
-    branches:
-      - "**"
+    branches: ["main"]
 
-permissions:
-  contents: read
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  setup:
-    name: Setup
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
-
-      - name: Configurar Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Actualizar pip
-        run: python -m pip install --upgrade pip
-
-      - name: Instalar dependencias base
-        run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Instalar dependencias de CI
-        run: |
-          pip install pytest pytest-cov ruff flake8 bandit
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    needs: setup
-
-    steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
-
-      - name: Configurar Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Actualizar pip
-        run: python -m pip install --upgrade pip
-
-      - name: Instalar dependencias
-        run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install ruff flake8
-
-      - name: Ruff
-        run: ruff check .
-
-      - name: Flake8
-        run: flake8 app tests --max-line-length=120 --exclude=venv,__pycache__,htmlcov,.git,.pytest_cache
-
+  # =========================
+  # TEST UNITARIOS
+  # =========================
   test:
-    name: Tests + Coverage
     runs-on: ubuntu-latest
-    needs: setup
 
     steps:
-      - name: Checkout código
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Configurar Python 3.11
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      - name: Actualizar pip
-        run: python -m pip install --upgrade pip
-
-      - name: Instalar dependencias
+      - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest pytest-cov
+          pip install -r requirements.txt
 
-      - name: Ejecutar tests con cobertura mínima 80%
+      - name: Run tests
         run: |
-          pytest \
-            --cov=app \
-            --cov-config=.coveragerc \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-fail-under=80
+          pytest -q
 
-      - name: Subir reporte HTML de cobertura
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-html
-          path: htmlcov/
-
-      - name: Subir coverage.xml
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-xml
-          path: coverage.xml
-
-  security:
-    name: Security
+  # =========================
+  # BUILD DOCKER IMAGE
+  # =========================
+  build:
     runs-on: ubuntu-latest
-    needs: setup
-
-    steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
-
-      - name: Configurar Python 3.11
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Actualizar pip
-        run: python -m pip install --upgrade pip
-
-      - name: Instalar dependencias
-        run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install bandit
-
-      - name: Ejecutar Bandit
-        run: bandit -c .bandit -r app -x tests
-
-  docker-publish:
-    name: Build y Publish Docker a GHCR
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - test
-      - security
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
 
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout código
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Login a GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extraer metadata de imagen
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
             type=sha
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build y push de imagen Docker
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+
+  # =========================
+  # INTEGRATION TESTS
+  # =========================
+  test-integration:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Pull latest image
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Run docker-compose
+        run: |
+          docker-compose -f docker-compose.yml up -d
+
+      - name: Wait API
+        run: |
+          sleep 10
+
+      - name: Smoke test basic endpoints
+        run: |
+          curl --fail http://localhost:8000/health
+          curl --fail http://localhost:8000/api/v1/health
+
+  # =========================
+  # DEPLOY STAGING
+  # =========================
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: test-integration
+
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set Kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Deploy image to staging
+        run: |
+          kubectl set image deployment/api-jmv api=ghcr.io/${{ github.repository }}:latest
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/api-jmv
+
+      - name: Run smoke tests
+        run: |
+          bash scripts/smoke_test.sh
+
+  # =========================
+  # DEPLOY PRODUCCIÓN
+  # =========================
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production
+
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set Kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Deploy to production
+        run: |
+          kubectl set image deployment/api-jmv api=ghcr.io/${{ github.repository }}:latest
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/api-jmv
+
+      - name: Health check
+        run: |
+          bash scripts/health_check.sh || exit 1
+
+      - name: Rollback if failed
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/api-jmv

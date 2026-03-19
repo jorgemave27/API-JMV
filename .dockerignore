@@ -1,25 +1,46 @@
-# Entorno virtual local
+# =========================
+
+# ENTORNO VIRTUAL
+
+# =========================
 
 venv/
+.venv/
 
-# Variables de entorno locales
+# =========================
+
+# VARIABLES DE ENTORNO
+
+# =========================
 
 .env
 .env.\*
 
-# Caché de Python
+# =========================
+
+# PYTHON CACHE
+
+# =========================
 
 **pycache**/
 _.pyc
 _.pyo
 \*.pyd
 
-# Metadata de git
+# =========================
+
+# GIT
+
+# =========================
 
 .git
 .gitignore
 
-# Cachés y reportes locales
+# =========================
+
+# TEST / CACHE / BUILD
+
+# =========================
 
 .pytest_cache/
 .mypy_cache/
@@ -27,10 +48,47 @@ _.pyo
 htmlcov/
 dist/
 build/
+
+# =========================
+
+# SISTEMA
+
+# =========================
+
 .DS_Store
 
-# Bases locales
+# =========================
+
+# BASES DE DATOS LOCALES
+
+# =========================
 
 _.sqlite3
 _.db
 database.db
+
+# =========================
+
+# DOCKER (opcional)
+
+# =========================
+
+docker-compose.override.yml
+
+# =========================
+
+# LOGS
+
+# =========================
+
+\*.log
+
+# =========================
+
+# K8s / Terraform sensibles (opcional)
+
+# =========================
+
+_.tfstate
+_.tfstate.\*
+\*.pem
