@@ -188,6 +188,14 @@ class Settings(BaseSettings):
     PROFILING_OUTPUT_DIR: str = "profiles"
 
     # -------------------------------------------------
+    # DATABASE POOLING / REPLICAS / SHARDING
+    # -------------------------------------------------
+    DATABASE_READ_URL: str | None = None
+
+    DATABASE_SHARD_1: str | None = None
+    DATABASE_SHARD_2: str | None = None
+
+    # -------------------------------------------------
     # Helpers
     # -------------------------------------------------
 

@@ -30,7 +30,7 @@ from app.core.metrics import ITEMS_CREATED_BY_CATEGORY, increment_crud_operation
 from app.core.request_context import set_current_user_id
 from app.core.responses import error_response
 from app.core.security import require_role, verify_api_key
-from app.database.database import get_db, get_db_async
+from app.database.database import get_db, get_db_async, get_read_db
 from app.dependencies import get_item_repo
 from app.messaging.kafka_publisher import publish_domain_event
 from app.messaging.producer import RabbitMQProducer
@@ -809,7 +809,7 @@ async def listar_items(
 def buscar_items(
     request: Request,
     nombre: str = Query(..., min_length=1, description="Nombre exacto del item"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     """
     Busca items por nombre exacto e instrumenta lectura y latencia DB.
@@ -849,7 +849,7 @@ def listar_items_cursor(
     request: Request,
     cursor: int = Query(0, ge=0, description="Último ID visto; 0 para iniciar"),
     limite: int = Query(10, ge=1, le=100, description="Cantidad máxima de items por página"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     """
     Lista items con cursor e instrumenta lectura y latencia DB.
@@ -903,7 +903,7 @@ def listar_eliminados(
     request: Request,
     page: int = Query(1, ge=1, description="Página (>=1)"),
     page_size: int = Query(10, ge=1, le=100, description="Tamaño de página (1-100)"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     """
     Lista items eliminados e instrumenta lectura y latencia DB.
@@ -1110,7 +1110,7 @@ async def actualizar_item(
 )
 def obtener_historial_item(
     item_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     """
     Obtiene historial de auditoría e instrumenta lectura.
@@ -1166,7 +1166,7 @@ def obtener_historial_item(
 def obtener_estado_item_en_fecha(
     item_id: int,
     fecha: datetime = Query(..., description="Fecha y hora en formato ISO 8601"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_read_db),
 ):
     """
     Reconstruye el estado de un item en una fecha dada.

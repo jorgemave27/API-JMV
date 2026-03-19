@@ -4,36 +4,23 @@ from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
 
 
+# ==========================================================
+# BASE
+# ==========================================================
 class Base(DeclarativeBase):
-    """
-    Clase base para todos los modelos ORM del proyecto.
-
-    Todos los modelos SQLAlchemy deben heredar de esta clase para compartir
-    la misma metadata. Alembic usa esta metadata para detectar cambios
-    en el esquema de la base de datos.
-    """
-
     pass
 
 
+# ==========================================================
+# URL HELPERS
+# ==========================================================
 def _build_async_database_url(database_url: str) -> str:
-    """
-    Convierte la DATABASE_URL sync a una URL async compatible con SQLAlchemy.
-
-    Ejemplos:
-    - sqlite:///./database.db         -> sqlite+aiosqlite:///./database.db
-    - postgresql://user:pass@host/db  -> postgresql+asyncpg://user:pass@host/db
-    """
     if database_url.startswith("sqlite:///"):
         return database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
 
@@ -51,47 +38,28 @@ def _build_async_database_url(database_url: str) -> str:
 
 
 # ==========================================================
-# Configuración SYNC (se conserva para no romper la API actual)
+# MAIN DB (WRITE - PGBOUNCER)
 # ==========================================================
 database_url = settings.DATABASE_URL
-is_sqlite = database_url.startswith("sqlite")
-
-engine_kwargs: dict[str, Any] = {
-    "future": True,
-    "pool_pre_ping": True,
-}
-
-if is_sqlite:
-    # SQLite requiere check_same_thread=False cuando se usa con FastAPI.
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    # Pool de conexiones recomendado para PostgreSQL en producción.
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
-
+async_database_url = _build_async_database_url(database_url)
 
 engine = create_engine(
     database_url,
-    **engine_kwargs,
+    pool_size=50,          # 🔥 aumentado para PgBouncer
+    max_overflow=100,
+    pool_pre_ping=True,
+    future=True,
 )
-
 
 SessionLocal = sessionmaker(
     bind=engine,
     autocommit=False,
     autoflush=False,
-    future=True,
     class_=Session,
 )
 
 
 def get_db() -> Generator[Session, None, None]:
-    """
-    Dependency sync de FastAPI para obtener una sesión de base de datos.
-
-    Abre una sesión al iniciar el request y la cierra al finalizar,
-    incluso si ocurre una excepción.
-    """
     db = SessionLocal()
     try:
         yield db
@@ -100,29 +68,14 @@ def get_db() -> Generator[Session, None, None]:
 
 
 # ==========================================================
-# Configuración ASYNC (nueva para endpoints async)
+# ASYNC MAIN
 # ==========================================================
-async_database_url = _build_async_database_url(database_url)
-is_async_sqlite = async_database_url.startswith("sqlite+aiosqlite")
-
-async_engine_kwargs: dict[str, Any] = {
-    "pool_pre_ping": True,
-}
-
-if is_async_sqlite:
-    # Para SQLite async con aiosqlite
-    async_engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    # Para PostgreSQL async con asyncpg
-    async_engine_kwargs["pool_size"] = 10
-    async_engine_kwargs["max_overflow"] = 20
-
-
 async_engine = create_async_engine(
     async_database_url,
-    **async_engine_kwargs,
+    pool_size=50,
+    max_overflow=100,
+    pool_pre_ping=True,
 )
-
 
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,
@@ -134,10 +87,54 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db_async() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency async de FastAPI para obtener una AsyncSession.
-
-    Se usa solo en endpoints async.
-    """
     async with AsyncSessionLocal() as db:
         yield db
+
+
+# ==========================================================
+# READ REPLICA
+# ==========================================================
+if settings.DATABASE_READ_URL:
+    read_engine = create_engine(
+        settings.DATABASE_READ_URL,
+        pool_size=50,
+        max_overflow=100,
+        pool_pre_ping=True,
+    )
+
+    ReadSessionLocal = sessionmaker(bind=read_engine)
+
+    def get_read_db():
+        db = ReadSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+else:
+    get_read_db = get_db
+
+
+# ==========================================================
+# SHARDING
+# ==========================================================
+if settings.DATABASE_SHARD_1 and settings.DATABASE_SHARD_2:
+    shard1_engine = create_engine(settings.DATABASE_SHARD_1)
+    shard2_engine = create_engine(settings.DATABASE_SHARD_2)
+
+    Shard1Session = sessionmaker(bind=shard1_engine)
+    Shard2Session = sessionmaker(bind=shard2_engine)
+else:
+    Shard1Session = SessionLocal
+    Shard2Session = SessionLocal
+
+
+class ShardRouter:
+    """
+    Router simple por rango de ID
+    """
+
+    @staticmethod
+    def get_session(item_id: int):
+        if item_id <= 500000:
+            return Shard1Session()
+        return Shard2Session()
