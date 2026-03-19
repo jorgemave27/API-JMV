@@ -1,21 +1,17 @@
+# =====================================================
+# DOCKER COMPOSE COMPLETO - API-JMV + AUTH SERVICE
+# =====================================================
+
 version: "3.9"
 
 services:
   # =====================================================
-  # API PRINCIPAL (FIX CI/CD)
-  # - usa imagen del registry
-  # - evita migraciones automáticas (AQUI estaba el error)
-  # - desactiva servicios pesados innecesarios
+  # API PRINCIPAL (ITEMS SERVICE)
   # =====================================================
   api:
     image: ghcr.io/jorgemave27/api-jmv:latest
     container_name: api-jmv-api
 
-    # -----------------------------------------------------
-    # 🔥 CLAVE:
-    # Sobrescribimos entrypoint para evitar scripts que
-    # ejecutan alembic (esto era lo que rompía el pipeline)
-    # -----------------------------------------------------
     entrypoint:
       ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
@@ -23,9 +19,6 @@ services:
       - "8000:8000"
 
     environment:
-      # -----------------------------------------------------
-      # ENV BASE
-      # -----------------------------------------------------
       APP_ENV: production
 
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
@@ -39,27 +32,17 @@ services:
 
       REDIS_URL: redis://redis:6379/0
 
-      # -----------------------------------------------------
-      # 🔥 DESACTIVAMOS LO PESADO PARA CI
-      # -----------------------------------------------------
       CELERY_ENABLED: "false"
       KAFKA_ENABLED: "false"
       CONSUL_ENABLED: "false"
 
-      # -----------------------------------------------------
-      # SERVICE CONFIG
-      # -----------------------------------------------------
       SERVICE_NAME: api-jmv
       SERVICE_HOST: api-jmv-api
       SERVICE_PORT: 8000
 
-      # -----------------------------------------------------
-      # OBSERVABILIDAD (ok dejarlo)
-      # -----------------------------------------------------
       PROMETHEUS_ENABLED: "true"
 
     depends_on:
-      # Espera a DB y Redis antes de levantar API
       db:
         condition: service_healthy
       redis:
@@ -71,7 +54,36 @@ services:
     restart: unless-stopped
 
   # =====================================================
-  # POSTGRES (BASE DE DATOS)
+  # AUTH SERVICE 🔥 NUEVO
+  # =====================================================
+  auth-service:
+    build: ./auth-service
+    container_name: api-jmv-auth
+
+    ports:
+      - "8001:8001"
+
+    environment:
+      APP_ENV: production
+
+      DATABASE_URL: postgresql://auth_user:auth_pass@auth-db:5432/auth_db
+
+      JWT_SECRET_KEY: super-secret-key-change-me-in-production
+      SECRET_KEY: super-secret-key-change-me-in-production
+
+      REDIS_URL: redis://redis:6379/0
+
+    depends_on:
+      - auth-db
+      - redis
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
+  # =====================================================
+  # DB PRINCIPAL
   # =====================================================
   db:
     image: postgres:15
@@ -88,12 +100,34 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-    # Healthcheck para saber cuándo DB está lista
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d api_jmv"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
+  # =====================================================
+  # AUTH DB 🔥 NUEVA
+  # =====================================================
+  auth-db:
+    image: postgres:15
+    container_name: api-jmv-auth-db
+
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
 
     networks:
       - api_jmv_network
@@ -125,7 +159,7 @@ services:
     restart: unless-stopped
 
   # =====================================================
-  # NGINX GATEWAY (NO NECESARIO EN CI PERO OK)
+  # NGINX GATEWAY 🔥
   # =====================================================
   gateway:
     image: nginx:alpine
@@ -139,6 +173,7 @@ services:
 
     depends_on:
       - api
+      - auth-service
 
     networks:
       - api_jmv_network
@@ -194,6 +229,7 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
+  auth_postgres_data:
 
 # =====================================================
 # NETWORK

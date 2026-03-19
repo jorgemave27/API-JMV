@@ -1,3 +1,8 @@
+# =====================================================
+# Ruta: app/core/security.py
+# VERSION FINAL CORREGIDA - TAREA 77
+# =====================================================
+
 from __future__ import annotations
 
 import hashlib
@@ -27,16 +32,14 @@ from app.security.token_blacklist import (
 
 logger = logging.getLogger(__name__)
 
-
 # =====================================================
 # PASSWORD HASHING
 # =====================================================
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Bearer auth para JWT
+# Fallback local cuando no se pasa por gateway
 bearer_scheme = HTTPBearer(auto_error=False)
-
 
 # =====================================================
 # CONFIGURACIÓN SEGURIDAD
@@ -45,7 +48,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 MAX_FAILED_LOGIN_ATTEMPTS = 5
 ACCOUNT_BLOCK_MINUTES = 15
 RESET_TOKEN_EXPIRE_HOURS = 1
-
 
 # =====================================================
 # API KEY VALIDATION
@@ -151,17 +153,11 @@ def hash_reset_token(token: str) -> str:
 def get_request_ip(request: Request) -> str:
     """
     Obtiene IP real priorizando X-Forwarded-For.
-
-    Orden:
-    1. X-Forwarded-For
-    2. request.client.host
-    3. unknown
     """
 
     forwarded_for = request.headers.get("x-forwarded-for")
 
     if forwarded_for:
-        # Puede venir una lista "ip1, ip2, ip3"
         real_ip = forwarded_for.split(",")[0].strip()
         if real_ip:
             return real_ip
@@ -181,8 +177,7 @@ def get_request_user_agent(request: Request) -> str:
 
 def get_token_remaining_seconds(payload: dict) -> int:
     """
-    Calcula segundos restantes de vida de un JWT
-    a partir del claim exp.
+    Calcula segundos restantes de vida de un JWT a partir del claim exp.
     """
 
     exp = payload.get("exp")
@@ -205,11 +200,6 @@ def register_session_from_token(
 ) -> None:
     """
     Registra una sesión activa en Redis a partir de un JWT ya emitido.
-
-    Se usa especialmente en:
-    - login
-    - refresh
-    - validación normal de endpoints protegidos
     """
 
     try:
@@ -364,17 +354,34 @@ def reset_failed_login_attempts(db: Session, user: Usuario) -> None:
 
 def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> Usuario:
     """
-    Obtiene usuario autenticado validando:
-    - JWT
-    - blacklist
-    - token theft
-    - sesiones distribuidas
+    Flujo principal:
+    - NGINX valida JWT contra auth-service
+    - NGINX inyecta X-User-Id
+    - Aquí resolvemos al usuario usando ese valor
+
+    OJO:
+    En tu implementación actual el header X-User-Id contiene el EMAIL,
+    porque el claim "sub" de tu JWT guarda el email.
     """
 
+    # Camino principal por gateway
+    if x_user_id:
+        user = db.query(Usuario).filter(Usuario.email == x_user_id).first()
+
+        if not user or not user.activo:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario inválido",
+            )
+
+        return user
+
+    # Fallback local cuando pegas directo a :8000
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -410,10 +417,6 @@ def get_current_user(
 
     ip = get_request_ip(request)
 
-    # =====================================================
-    # TOKEN THEFT DETECTION
-    # =====================================================
-
     if jti and anomaly_detector.detect_token_theft(jti, ip):
         logger.warning(
             "SECURITY_EVENT posible_robo_token user=%s jti=%s ip=%s",
@@ -431,10 +434,6 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sesión inválida. Reautenticación requerida",
         )
-
-    # =====================================================
-    # SESSION TRACKING
-    # =====================================================
 
     if jti:
         register_session_from_token(
