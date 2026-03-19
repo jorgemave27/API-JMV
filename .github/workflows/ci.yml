@@ -1,54 +1,69 @@
+# ==========================================================
+# PIPELINE CI/CD COMPLETO - API-JMV
+# ==========================================================
+
 name: API-JMV CI/CD PIPELINE
 
+# ==========================================================
+# EVENTOS QUE DISPARAN EL PIPELINE
+# ==========================================================
 on:
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "develop"] # Ejecuta en push a main o develop
   pull_request:
-    branches: ["main"]
+    branches: ["main"] # Ejecuta en PR hacia main
 
+# ==========================================================
+# VARIABLES GLOBALES
+# ==========================================================
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/api-jmv
+  REGISTRY: ghcr.io # Registry de GitHub
+  IMAGE_NAME: ${{ github.repository_owner }}/api-jmv # Nombre SIEMPRE en lowercase
 
+# ==========================================================
+# JOB 1: TEST UNITARIOS
+# ==========================================================
 jobs:
-  # =========================
-  # TEST UNITARIOS
-  # =========================
   test:
     runs-on: ubuntu-latest
 
     steps:
+      # Clona el repositorio
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Configura Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Instala dependencias
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
 
+      # Ejecuta tests
       - name: Run tests
         run: |
           pytest -q
 
-  # =========================
-  # BUILD DOCKER IMAGE
-  # =========================
+  # ==========================================================
+  # JOB 2: BUILD Y PUSH DE IMAGEN DOCKER
+  # ==========================================================
   build:
     runs-on: ubuntu-latest
-    needs: test
+    needs: test # Solo corre si tests pasan
 
     permissions:
       contents: read
-      packages: write
+      packages: write # Necesario para push a GHCR
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Login al registry de GitHub
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -56,6 +71,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Genera tags automáticamente (sha, branch, latest)
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -66,6 +82,7 @@ jobs:
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Construye y sube la imagen
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -73,92 +90,119 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
 
-  # =========================
-  # INTEGRATION TESTS
-  # =========================
+  # ==========================================================
+  # JOB 3: TEST DE INTEGRACIÓN (CON DOCKER)
+  # ==========================================================
   test-integration:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build # Solo corre si build pasó
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Descarga la imagen recién construida
       - name: Pull latest image
         run: |
-          docker pull ghcr.io/jorgemave27/api-jmv:latest
+          docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
 
-      - name: Run docker-compose
+      # Levanta todo el entorno con Docker Compose
+      - name: Run docker compose
         run: |
-          docker-compose -f docker-compose.yml up -d
+          docker compose -f docker-compose.yml up -d
 
+      # Espera a que la API arranque
       - name: Wait API
         run: |
-          sleep 10
+          sleep 20
 
+      # Smoke tests básicos
       - name: Smoke test basic endpoints
         run: |
           curl --fail http://localhost:8000/health
           curl --fail http://localhost:8000/api/v1/health
 
-  # =========================
-  # DEPLOY STAGING
-  # =========================
+      # Si algo falla, imprime logs
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --tail=200
+
+  # ==========================================================
+  # JOB 4: DEPLOY A STAGING
+  # ==========================================================
   deploy-staging:
     runs-on: ubuntu-latest
-    needs: test-integration
+    needs: test-integration # Solo corre si integración pasó
 
     steps:
+      # Instala kubectl
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
+      # Configura acceso al cluster staging
       - name: Set Kubeconfig
         run: |
           echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig
-          export KUBECONFIG=kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
 
+      # Actualiza imagen en deployment
       - name: Deploy image to staging
         run: |
-          kubectl set image deployment/api-jmv api=ghcr.io/${{ github.repository }}:latest
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl set image deployment/api-jmv api-jmv=ghcr.io/${{ env.IMAGE_NAME }}:latest
 
+      # Verifica rollout
       - name: Verify rollout
         run: |
-          kubectl rollout status deployment/api-jmv
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl rollout status deployment/api-jmv --timeout=180s
 
+      # Ejecuta smoke tests en staging
       - name: Run smoke tests
         run: |
           bash scripts/smoke_test.sh
 
-  # =========================
-  # DEPLOY PRODUCCIÓN
-  # =========================
+  # ==========================================================
+  # JOB 5: DEPLOY A PRODUCCIÓN (CON APROBACIÓN)
+  # ==========================================================
   deploy-production:
     runs-on: ubuntu-latest
     needs: deploy-staging
-    environment: production
+    environment: production # Requiere aprobación manual en GitHub
 
     steps:
+      # Instala kubectl
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
+      # Configura acceso al cluster producción
       - name: Set Kubeconfig
         run: |
           echo "${{ secrets.KUBE_CONFIG_PROD }}" > kubeconfig
-          export KUBECONFIG=kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
 
+      # Despliegue a producción
       - name: Deploy to production
         run: |
-          kubectl set image deployment/api-jmv api=ghcr.io/${{ github.repository }}:latest
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl set image deployment/api-jmv api-jmv=ghcr.io/${{ env.IMAGE_NAME }}:latest
 
+      # Verifica rollout
       - name: Verify rollout
         run: |
-          kubectl rollout status deployment/api-jmv
+          export KUBECONFIG=$PWD/kubeconfig
+          kubectl rollout status deployment/api-jmv --timeout=180s
 
+      # Health check post deploy
       - name: Health check
         run: |
-          bash scripts/health_check.sh || exit 1
+          bash scripts/health_check.sh
 
+      # Rollback automático si falla
       - name: Rollback if failed
         if: failure()
         run: |
+          export KUBECONFIG=$PWD/kubeconfig
           kubectl rollout undo deployment/api-jmv
