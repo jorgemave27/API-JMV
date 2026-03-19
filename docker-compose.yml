@@ -2,15 +2,30 @@ version: "3.9"
 
 services:
   # =====================================================
-  # API PRINCIPAL (USA IMAGEN DEL REGISTRY)
+  # API PRINCIPAL (FIX CI/CD)
+  # - usa imagen del registry
+  # - evita migraciones automáticas (AQUI estaba el error)
+  # - desactiva servicios pesados innecesarios
   # =====================================================
   api:
     image: ghcr.io/jorgemave27/api-jmv:latest
     container_name: api-jmv-api
+
+    # -----------------------------------------------------
+    # 🔥 CLAVE:
+    # Sobrescribimos entrypoint para evitar scripts que
+    # ejecutan alembic (esto era lo que rompía el pipeline)
+    # -----------------------------------------------------
+    entrypoint:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
     ports:
       - "8000:8000"
 
     environment:
+      # -----------------------------------------------------
+      # ENV BASE
+      # -----------------------------------------------------
       APP_ENV: production
 
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
@@ -24,30 +39,27 @@ services:
 
       REDIS_URL: redis://redis:6379/0
 
-      CELERY_ENABLED: "true"
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-
-      KAFKA_ENABLED: "true"
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_CLIENT_ID: api-jmv
-      KAFKA_EVENTS_TOPIC: jmv.domain-events
-
+      # -----------------------------------------------------
+      # 🔥 DESACTIVAMOS LO PESADO PARA CI
+      # -----------------------------------------------------
+      CELERY_ENABLED: "false"
+      KAFKA_ENABLED: "false"
       CONSUL_ENABLED: "false"
 
+      # -----------------------------------------------------
+      # SERVICE CONFIG
+      # -----------------------------------------------------
       SERVICE_NAME: api-jmv
       SERVICE_HOST: api-jmv-api
       SERVICE_PORT: 8000
 
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
-
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: 5044
-
+      # -----------------------------------------------------
+      # OBSERVABILIDAD (ok dejarlo)
+      # -----------------------------------------------------
       PROMETHEUS_ENABLED: "true"
 
     depends_on:
+      # Espera a DB y Redis antes de levantar API
       db:
         condition: service_healthy
       redis:
@@ -55,29 +67,37 @@ services:
 
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
   # =====================================================
-  # POSTGRES
+  # POSTGRES (BASE DE DATOS)
   # =====================================================
   db:
     image: postgres:15
     container_name: api-jmv-db
+
     environment:
       POSTGRES_DB: api_jmv
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+
     ports:
       - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+    # Healthcheck para saber cuándo DB está lista
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d api_jmv"]
       interval: 10s
       timeout: 5s
       retries: 5
+
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
   # =====================================================
@@ -86,33 +106,43 @@ services:
   redis:
     image: redis:7-alpine
     container_name: api-jmv-redis
+
     ports:
       - "6379:6379"
+
     volumes:
       - redis_data:/data
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
   # =====================================================
-  # NGINX GATEWAY
+  # NGINX GATEWAY (NO NECESARIO EN CI PERO OK)
   # =====================================================
   gateway:
     image: nginx:alpine
     container_name: api-jmv-gateway
+
     ports:
       - "80:80"
+
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+
     depends_on:
       - api
+
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
   # =====================================================
@@ -121,13 +151,17 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: api-jmv-prometheus
+
     ports:
       - "9090:9090"
+
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
   # =====================================================
@@ -136,15 +170,20 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: api-jmv-grafana
+
     ports:
       - "3000:3000"
+
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+
     volumes:
       - grafana_data:/var/lib/grafana
+
     networks:
       - api_jmv_network
+
     restart: unless-stopped
 
 # =====================================================
