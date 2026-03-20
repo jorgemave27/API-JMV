@@ -17,6 +17,7 @@ import zlib
 from typing import Any, Optional, Callable, Dict
 
 from cachetools import TTLCache
+from prometheus_client import Counter
 
 # 🔥 USAMOS TU CLIENTE REAL
 from app.core.redis_client import redis_client
@@ -38,6 +39,11 @@ def _serialize(value: Any) -> str:
     """
     Serializa y comprime si >1KB.
     Redis trabaja con strings (decode_responses=True)
+
+    IMPORTANTE:
+    - Si value no es JSON-serializable (ej. un modelo ORM),
+      json.dumps lanzará TypeError.
+    - Ese caso se controla en get_or_set para NO romper el flujo.
     """
     data = json.dumps(value)
 
@@ -69,8 +75,6 @@ def _get_lock(key: str) -> asyncio.Lock:
 # ==============================
 # MÉTRICAS
 # ==============================
-from prometheus_client import Counter
-
 L1_HITS = Counter("cache_l1_hits", "L1 cache hits")
 L2_HITS = Counter("cache_l2_hits", "L2 cache hits")
 DB_HITS = Counter("cache_db_hits", "DB hits")
@@ -88,6 +92,11 @@ async def get_or_set(
     """
     Flujo:
     L1 → L2 → DB
+
+    IMPORTANTE:
+    - Si el valor obtenido desde DB no es serializable JSON
+      (por ejemplo, una entidad ORM como Item), NO se cachea,
+      pero sí se devuelve sin romper el flujo.
     """
 
     # ---------- L1 ----------
@@ -108,11 +117,12 @@ async def get_or_set(
     lock = _get_lock(key)
 
     async with lock:
-        # Double check
+        # Double check L1
         if key in L1_CACHE:
             L1_HITS.inc()
             return L1_CACHE[key]
 
+        # Double check L2
         cached = redis_client.get(key)
         if cached:
             value = _deserialize(cached)
@@ -127,15 +137,32 @@ async def get_or_set(
         if value is None:
             return None
 
+        # =====================================================
+        # Si el valor no es serializable (ej. modelo ORM),
+        # NO rompemos el flujo: simplemente no lo cacheamos.
+        # =====================================================
+        try:
+            serialized = _serialize(value)
+        except TypeError:
+            return value
+        except Exception:
+            return value
+
         # Guardar en L1
-        L1_CACHE[key] = value
+        try:
+            L1_CACHE[key] = value
+        except Exception:
+            pass
 
         # Guardar en Redis
-        redis_client.set(
-            key,
-            _serialize(value),
-            ex=redis_ttl or ttl,
-        )
+        try:
+            redis_client.set(
+                key,
+                serialized,
+                ex=redis_ttl or ttl,
+            )
+        except Exception:
+            pass
 
         return value
 

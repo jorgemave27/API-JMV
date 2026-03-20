@@ -2,21 +2,33 @@ version: "3.9"
 
 services:
   # =====================================================
-  # API PRINCIPAL (ITEMS SERVICE)
+  # API PRINCIPAL
+  # IMPORTANTE:
+  # - Usa imagen remota para NO disparar pytest en build
+  # - Monta tu código local para que sí tome tus cambios
   # =====================================================
   api:
     image: ghcr.io/jorgemave27/api-jmv:latest
     container_name: api-jmv-api
-
+    working_dir: /app
     entrypoint:
-      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
     ports:
       - "8000:8000"
 
+    volumes:
+      - ./:/app
+
     environment:
       APP_ENV: production
-
       DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
 
       API_KEY: dev-secret-key-change-me
@@ -27,6 +39,7 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: 7
 
       REDIS_URL: redis://redis:6379/0
+      ELASTICSEARCH_URL: http://elasticsearch:9200
 
       CELERY_ENABLED: "false"
       KAFKA_ENABLED: "false"
@@ -47,6 +60,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      elasticsearch:
+        condition: service_started
 
     networks:
       - api_jmv_network
@@ -65,17 +80,16 @@ services:
 
     environment:
       APP_ENV: production
-
       DATABASE_URL: postgresql://auth_user:auth_pass@auth-db:5432/auth_db
-
       JWT_SECRET_KEY: super-secret-key-change-me-in-production
       SECRET_KEY: super-secret-key-change-me-in-production
-
       REDIS_URL: redis://redis:6379/0
 
     depends_on:
-      - auth-db
-      - redis
+      auth-db:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
     networks:
       - api_jmv_network
@@ -129,6 +143,12 @@ services:
     volumes:
       - auth_postgres_data:/var/lib/postgresql/data
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     networks:
       - api_jmv_network
 
@@ -149,8 +169,8 @@ services:
 
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
 
     networks:
@@ -192,8 +212,10 @@ services:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
 
     depends_on:
-      - api
-      - auth-service
+      api:
+        condition: service_started
+      auth-service:
+        condition: service_started
 
     networks:
       - api_jmv_network
@@ -212,7 +234,6 @@ services:
 
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
 
     networks:
       - api_jmv_network
@@ -241,12 +262,35 @@ services:
 
     restart: unless-stopped
 
+  # =====================================================
+  # ELASTICSEARCH
+  # =====================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    container_name: api-jmv-elasticsearch
+
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+
+    ports:
+      - "9200:9200"
+
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+    networks:
+      - api_jmv_network
+
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
-  prometheus_data:
   grafana_data:
   auth_postgres_data:
+  es_data:
 
 networks:
   api_jmv_network:

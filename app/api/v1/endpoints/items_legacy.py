@@ -54,6 +54,18 @@ from app.services.metrics_service import (
 )
 from app.workers.tasks import enviar_notificacion
 
+# =========================================================
+# ELASTICSEARCH
+# =========================================================
+from app.search.elasticsearch_client import (
+    delete_item as es_delete_item,
+    increment_item_popularity,
+    index_item as es_index_item,
+    search_items as es_search_items,
+    suggest_items as es_suggest_items,
+    update_item as es_update_item,
+)
+
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
@@ -244,6 +256,7 @@ async def crear_item(
     IMPORTANTE:
     - Aquí ya usamos await repo.create(...) para no devolver coroutines
     - La invalidación del cache multinivel vive en el repository
+    - Se sincroniza Elasticsearch después de persistir en PostgreSQL
     """
     _bind_audit_user(current_user)
 
@@ -274,6 +287,14 @@ async def crear_item(
     try:
         with measure_db_query("insert", "items"):
             item = await repo.create(item)
+
+        # -------------------------------------------------
+        # Sincronización con Elasticsearch
+        # -------------------------------------------------
+        try:
+            es_index_item(item)
+        except Exception as exc:
+            logger.warning("No se pudo indexar item %s en Elasticsearch: %s", item.id, exc)
 
         category_name = categoria.nombre if categoria else "sin_categoria"
         ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
@@ -336,6 +357,7 @@ def bulk_create_items(
 ):
     """
     Crea items en lote e instrumenta métricas de bulk create.
+    Además, sincroniza cada item creado hacia Elasticsearch.
     """
     _bind_audit_user(current_user)
 
@@ -380,6 +402,15 @@ def bulk_create_items(
         with measure_db_query("select", "items"):
             for obj in objects:
                 db.refresh(obj)
+
+        # -------------------------------------------------
+        # Sincronización bulk con Elasticsearch
+        # -------------------------------------------------
+        for obj in objects:
+            try:
+                es_index_item(obj)
+            except Exception as exc:
+                logger.warning("No se pudo indexar item bulk %s en Elasticsearch: %s", obj.id, exc)
 
         for it in payload.items:
             categoria_id = getattr(it, "categoria_id", None)
@@ -446,6 +477,7 @@ def bulk_delete_items(
 ):
     """
     Elimina items en lote (soft delete) e instrumenta métricas de bulk delete.
+    También elimina del índice de Elasticsearch los items afectados.
     """
     try:
         now = datetime.now()
@@ -475,6 +507,15 @@ def bulk_delete_items(
 
         with measure_db_query("update", "items"):
             db.commit()
+
+        # -------------------------------------------------
+        # Sincronización bulk delete con Elasticsearch
+        # -------------------------------------------------
+        for item_id in affected_ids:
+            try:
+                es_delete_item(item_id)
+            except Exception as exc:
+                logger.warning("No se pudo eliminar item %s del índice Elasticsearch: %s", item_id, exc)
 
         sync_active_items_gauge(db)
         increment_crud_operation("item", "bulk_delete", "success")
@@ -527,6 +568,7 @@ def bulk_update_disponible(
 ):
     """
     Actualiza disponibilidad en lote e instrumenta métricas de bulk update.
+    También actualiza Elasticsearch para cada item afectado.
     """
     try:
         with measure_db_query("select", "items"):
@@ -569,6 +611,18 @@ def bulk_update_disponible(
 
         with measure_db_query("update", "items"):
             db.commit()
+
+        # -------------------------------------------------
+        # Sincronización bulk update con Elasticsearch
+        # -------------------------------------------------
+        for item_id in set(affected_ids):
+            item = found_map.get(item_id)
+            if item is None:
+                continue
+            try:
+                es_update_item(item)
+            except Exception as exc:
+                logger.warning("No se pudo actualizar item %s en Elasticsearch: %s", item_id, exc)
 
         increment_crud_operation("item", "bulk_update_disponible", "success")
 
@@ -797,43 +851,130 @@ async def listar_items(
 
 
 # =========================================================
-# BUSCAR ITEMS
+# BUSCAR ITEMS (ELASTICSEARCH FULL-TEXT + FUZZY + FILTERS)
 # =========================================================
 @router.get(
     "/buscar",
-    response_model=ApiResponse[list[ItemRead]],
-    summary="Buscar items por nombre exacto de forma segura",
-    description="Devuelve items encontrados con _links HATEOAS absolutos.",
+    response_model=ApiResponse[list[dict]],
+    summary="Buscar items con Elasticsearch",
+    description=(
+        "Busca en nombre y descripción con Elasticsearch, soporta fuzzy search, "
+        "filtros por precio y categoría, e incluye highlight."
+    ),
     dependencies=[Depends(verify_api_key)],
 )
 def buscar_items(
     request: Request,
-    nombre: str = Query(..., min_length=1, description="Nombre exacto del item"),
-    db: Session = Depends(get_read_db),
+    q: str = Query(..., min_length=1, description="Texto a buscar"),
+    categoria_id: Optional[int] = Query(None, ge=1, description="Filtra por categoría"),
+    precio_min: Optional[float] = Query(None, ge=0, description="Precio mínimo"),
+    precio_max: Optional[float] = Query(None, ge=0, description="Precio máximo"),
+    page: int = Query(1, ge=1, description="Página"),
+    size: int = Query(10, ge=1, le=100, description="Tamaño de página"),
 ):
     """
-    Busca items por nombre exacto e instrumenta lectura y latencia DB.
+    Busca items usando Elasticsearch.
+    Devuelve:
+    - campos del documento indexado
+    - highlight de coincidencias
+    - links HATEOAS básicos
     """
     try:
-        with measure_db_query("select", "items"):
-            items = (
-                db.query(Item)
-                .filter(Item.name == nombre, Item.eliminado.is_(False))
-                .order_by(Item.id.asc())
-                .all()
+        hits = es_search_items(
+            query=q,
+            filters={
+                "categoria_id": categoria_id,
+                "precio_min": precio_min,
+                "precio_max": precio_max,
+            },
+            page=page,
+            size=size,
+        )
+
+        data: list[dict] = []
+
+        for hit in hits:
+            source = hit.get("_source", {})
+            item_id = int(hit["_id"]) if str(hit.get("_id", "")).isdigit() else hit.get("_id")
+
+            data.append(
+                {
+                    "id": item_id,
+                    "name": source.get("name"),
+                    "description": source.get("description"),
+                    "price": source.get("price"),
+                    "categoria_id": source.get("categoria_id"),
+                    "consultas_count": source.get("consultas_count", 0),
+                    "highlight": hit.get("highlight", {}),
+                    "_links": {
+                        "self": _build_absolute_url(request, "obtener_item_por_id", item_id=str(item_id)),
+                        "actualizar": _build_absolute_url(request, "actualizar_item", item_id=str(item_id)),
+                        "eliminar": _build_absolute_url(request, "eliminar_item", item_id=str(item_id)),
+                    },
+                }
             )
 
         increment_crud_operation("item", "search", "success")
 
-        return ApiResponse[list[ItemRead]](
+        return ApiResponse[list[dict]](
             success=True,
-            message="Búsqueda segura ejecutada",
-            data=_items_read_with_links(items, request),
-            metadata={},
+            message="Búsqueda full-text ejecutada exitosamente",
+            data=data,
+            metadata={
+                "query": q,
+                "page": page,
+                "size": size,
+                "engine": "elasticsearch",
+            },
         )
-    except Exception:
+    except Exception as exc:
         increment_crud_operation("item", "search", "error")
-        raise
+        logger.error("Error en búsqueda Elasticsearch: %s", exc, exc_info=True)
+        return error_response(
+            status_code=500,
+            message="Error al ejecutar búsqueda full-text",
+            data={"error": str(exc)},
+        )
+
+
+# =========================================================
+# SUGERENCIAS DE ITEMS (ELASTICSEARCH COMPLETION SUGGESTER)
+# =========================================================
+@router.get(
+    "/sugerir",
+    response_model=ApiResponse[list[str]],
+    summary="Sugerir nombres de items",
+    description="Devuelve hasta 5 sugerencias de nombres usando completion suggester de Elasticsearch.",
+    dependencies=[Depends(verify_api_key)],
+)
+def sugerir_items(
+    q: str = Query(..., min_length=1, description="Prefijo de búsqueda"),
+):
+    """
+    Sugerencias/autocompletado con Elasticsearch.
+    """
+    try:
+        suggestions = es_suggest_items(q)
+
+        increment_crud_operation("item", "suggest", "success")
+
+        return ApiResponse[list[str]](
+            success=True,
+            message="Sugerencias obtenidas exitosamente",
+            data=suggestions,
+            metadata={
+                "query": q,
+                "engine": "elasticsearch",
+            },
+        )
+    except Exception as exc:
+        increment_crud_operation("item", "suggest", "error")
+        logger.error("Error en suggester Elasticsearch: %s", exc, exc_info=True)
+        return error_response(
+            status_code=500,
+            message="Error al obtener sugerencias",
+            data={"error": str(exc)},
+        )
 
 
 # =========================================================
@@ -1002,6 +1143,7 @@ async def obtener_item_por_id(
     - Ahora usa cache multinivel del repository:
       L1 (memoria) -> L2 (Redis) -> DB
     - Esto permite que las métricas cache_l1_hits / cache_l2_hits / cache_db_hits suban
+    - Además incrementa popularidad en Elasticsearch para ordenar sugerencias
     """
     item = await repo.get_by_id(item_id)
 
@@ -1009,6 +1151,14 @@ async def obtener_item_por_id(
         response.headers["X-Cache"] = "MISS"
         increment_crud_operation("item", "read", "error")
         raise ItemNoEncontradoError(item_id)
+
+    # -------------------------------------------------
+    # Incrementar popularidad para suggester
+    # -------------------------------------------------
+    try:
+        increment_item_popularity(item_id)
+    except Exception as exc:
+        logger.warning("No se pudo incrementar popularidad de item %s en Elasticsearch: %s", item_id, exc)
 
     response.headers["X-Cache"] = "AUTO"
     increment_crud_operation("item", "read", "success")
@@ -1047,6 +1197,7 @@ async def actualizar_item(
     - Invalida caché multinivel automáticamente
     - Mantiene métricas
     - Evita lógica extra que está provocando 500
+    - Sincroniza Elasticsearch después de guardar cambios
     """
     _bind_audit_user(current_user)
 
@@ -1082,6 +1233,14 @@ async def actualizar_item(
     try:
         with measure_db_query("update", "items"):
             item = await repo.update(item)
+
+        # -------------------------------------------------
+        # Sincronización con Elasticsearch
+        # -------------------------------------------------
+        try:
+            es_update_item(item)
+        except Exception as exc:
+            logger.warning("No se pudo actualizar item %s en Elasticsearch: %s", item.id, exc)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "update", "success")
@@ -1235,6 +1394,7 @@ async def eliminar_item(
     IMPORTANTE:
     - Ahora usa await repo.get_by_id(...)
     - Ahora usa await repo.delete(...)
+    - Elimina el documento del índice de Elasticsearch
     """
     _bind_audit_user(current_user)
 
@@ -1262,6 +1422,14 @@ async def eliminar_item(
     try:
         with measure_db_query("update", "items"):
             await repo.delete(item)
+
+        # -------------------------------------------------
+        # Sincronización con Elasticsearch
+        # -------------------------------------------------
+        try:
+            es_delete_item(item.id)
+        except Exception as exc:
+            logger.warning("No se pudo eliminar item %s de Elasticsearch: %s", item.id, exc)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "delete", "success")
@@ -1328,6 +1496,7 @@ async def restaurar_item(
     IMPORTANTE:
     - Ahora usa await repo.get_by_id(...)
     - Ahora usa await repo.update(...)
+    - Reindexa el item en Elasticsearch
     """
     _bind_audit_user(current_user)
 
@@ -1348,6 +1517,14 @@ async def restaurar_item(
     try:
         with measure_db_query("update", "items"):
             item = await repo.update(item)
+
+        # -------------------------------------------------
+        # Sincronización con Elasticsearch
+        # -------------------------------------------------
+        try:
+            es_index_item(item)
+        except Exception as exc:
+            logger.warning("No se pudo reindexar item %s en Elasticsearch: %s", item.id, exc)
 
         sync_active_items_gauge(repo.db)
         increment_crud_operation("item", "restore", "success")
@@ -1394,6 +1571,7 @@ async def transferir_stock(
     IMPORTANTE:
     - Ahora usa await repo.get_by_id(...)
     - Conserva la lógica transaccional existente
+    - Sincroniza Elasticsearch para item origen y destino
     """
     _bind_audit_user(current_user)
 
@@ -1468,6 +1646,19 @@ async def transferir_stock(
         with measure_db_query("select", "items"):
             db.refresh(item_origen)
             db.refresh(item_destino)
+
+        # -------------------------------------------------
+        # Sincronización con Elasticsearch
+        # -------------------------------------------------
+        try:
+            es_update_item(item_origen)
+        except Exception as exc:
+            logger.warning("No se pudo actualizar item origen %s en Elasticsearch: %s", item_origen.id, exc)
+
+        try:
+            es_update_item(item_destino)
+        except Exception as exc:
+            logger.warning("No se pudo actualizar item destino %s en Elasticsearch: %s", item_destino.id, exc)
 
     except Exception as exc:
         db.rollback()
