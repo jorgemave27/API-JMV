@@ -17,9 +17,11 @@ class AutoProfilerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         response = await call_next(request)
 
-        if settings.APP_ENV != "development":
+        # 🚫 DESACTIVAR COMPLETAMENTE EN LOCAL
+        if settings.APP_ENV != "production":
             return response
 
+        # 🚫 SOLO GET
         if request.method != "GET":
             return response
 
@@ -47,7 +49,13 @@ class AutoProfilerMiddleware(BaseHTTPMiddleware):
         if consecutive_slow_requests < settings.PROFILING_CONSECUTIVE_SLOW_REQUESTS:
             return response
 
+        # 🚫 EVITAR PROFILER DUPLICADO (CLAVE)
+        if getattr(request.app.state, "profiler_running", False):
+            return response
+
         try:
+            request.app.state.profiler_running = True
+
             headers: dict[str, str] = {}
             auth_header = request.headers.get("Authorization")
             api_key = request.headers.get("X-API-Key")
@@ -75,5 +83,8 @@ class AutoProfilerMiddleware(BaseHTTPMiddleware):
                 path,
                 exc,
             )
+
+        finally:
+            request.app.state.profiler_running = False
 
         return response

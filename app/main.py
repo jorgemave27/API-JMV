@@ -3,13 +3,13 @@ from __future__ import annotations
 # =====================================================
 # IMPORTS
 # =====================================================
+import asyncio
 import logging
 import sentry_sdk
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from scalar_fastapi import get_scalar_api_reference
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -70,6 +70,9 @@ from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
 from app.middlewares.threat_detection import ThreatDetectionMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
+from app.middlewares.backpressure import BackpressureMiddleware
+from app.middlewares.priority import PriorityMiddleware
+
 from app.oauth.router import router as oauth_router
 from app.routers.categorias import router as categorias_router
 
@@ -144,6 +147,9 @@ def create_app() -> FastAPI:
     # =================================================
     # MIDDLEWARES
     # =================================================
+    app.add_middleware(PriorityMiddleware)
+    app.add_middleware(BackpressureMiddleware)
+
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(AuditContextMiddleware)
     app.add_middleware(ThreatDetectionMiddleware)
@@ -160,30 +166,36 @@ def create_app() -> FastAPI:
     app.add_middleware(SentryUserMiddleware)
 
     # =================================================
-    # DB INIT
-    # =================================================
-    Base.metadata.create_all(bind=engine)
-
-    db = SessionLocal()
-    try:
-        sync_active_items_gauge(db)
-        sync_active_users_gauge(db)
-    finally:
-        db.close()
-
-    # =================================================
-    # 🔥 STARTUP (ELASTICSEARCH + CONSUL)
+    # STARTUP
     # =================================================
     @app.on_event("startup")
     async def startup_tasks():
-        # Elasticsearch
+        # 🔥 DB INIT
         try:
-            create_index()
+            await asyncio.to_thread(Base.metadata.create_all, bind=engine)
+            logger.info("DB inicializada correctamente")
+        except Exception as exc:
+            logger.warning(f"Error inicializando DB: {exc}")
+
+        # 🔥 MÉTRICAS (YA CON TABLAS)
+        try:
+            db = SessionLocal()
+            try:
+                sync_active_items_gauge(db)
+                sync_active_users_gauge(db)
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.warning(f"Error inicializando métricas: {exc}")
+
+        # 🔥 ELASTICSEARCH
+        try:
+            await asyncio.to_thread(create_index)
             logger.info("Elasticsearch index verificado/creado")
         except Exception as exc:
             logger.warning(f"Error creando índice Elasticsearch: {exc}")
 
-        # Consul
+        # 🔥 CONSUL
         if settings.CONSUL_ENABLED:
             service_id = register_service(
                 name=settings.SERVICE_NAME,
