@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "title": "Redis Down - API debe seguir respondiendo",
+  "description": "Pausar Redis y validar fallback",
+  "steady-state-hypothesis": {
+    "title": "API responde OK",
+    "probes": [
+      {
+        "name": "health-check",
+        "type": "probe",
+        "provider": {
+          "type": "http",
+          "url": "http://localhost:8000/health",
+          "timeout": 3
+        }
+      }
+    ]
+  },
+  "method": [
+    {
+      "name": "pause-redis",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "docker",
+        "arguments": "pause redis"
+      }
+    },
+    {
+      "name": "wait",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "sleep",
+        "arguments": "30"
+      }
+    },
+    {
+      "name": "unpause-redis",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "docker",
+        "arguments": "unpause redis"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "title": "Auth Service Down",
+  "description": "Detener auth-service",
+  "steady-state-hypothesis": {
+    "title": "API responde",
+    "probes": [
+      {
+        "name": "health-check",
+        "type": "probe",
+        "provider": {
+          "type": "http",
+          "url": "http://localhost:8000/health"
+        }
+      }
+    ]
+  },
+  "method": [
+    {
+      "name": "stop-auth",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "docker",
+        "arguments": "stop auth-service"
+      }
+    },
+    {
+      "name": "wait",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "sleep",
+        "arguments": "30"
+      }
+    },
+    {
+      "name": "start-auth",
+      "type": "action",
+      "provider": {
+        "type": "process",
+        "path": "docker",
+        "arguments": "start auth-service"
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
+import time
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -9,12 +10,29 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
 
+# 👇 CHAOS STATE IMPORT
+try:
+    from app.api.v1.endpoints.chaos import CHAOS_STATE
+except Exception:
+    CHAOS_STATE = {"slow_db": False}
+
 
 # ==========================================================
 # BASE
 # ==========================================================
 class Base(DeclarativeBase):
     pass
+
+
+# ==========================================================
+# CHAOS HOOK
+# ==========================================================
+def maybe_slow_db():
+    """
+    Introduce latencia artificial cuando Chaos está activo.
+    """
+    if CHAOS_STATE.get("slow_db"):
+        time.sleep(2)
 
 
 # ==========================================================
@@ -45,7 +63,7 @@ async_database_url = _build_async_database_url(database_url)
 
 engine = create_engine(
     database_url,
-    pool_size=50,          # 🔥 aumentado para PgBouncer
+    pool_size=50,
     max_overflow=100,
     pool_pre_ping=True,
     future=True,
@@ -60,6 +78,11 @@ SessionLocal = sessionmaker(
 
 
 def get_db() -> Generator[Session, None, None]:
+    """
+    Dependency principal DB (sync)
+    """
+    maybe_slow_db()  # 👈 CHAOS HOOK
+
     db = SessionLocal()
     try:
         yield db
@@ -87,6 +110,11 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db_async() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Dependency async DB
+    """
+    maybe_slow_db()  # 👈 CHAOS HOOK
+
     async with AsyncSessionLocal() as db:
         yield db
 
@@ -105,6 +133,8 @@ if settings.DATABASE_READ_URL:
     ReadSessionLocal = sessionmaker(bind=read_engine)
 
     def get_read_db():
+        maybe_slow_db()  # 👈 CHAOS HOOK
+
         db = ReadSessionLocal()
         try:
             yield db
@@ -135,6 +165,8 @@ class ShardRouter:
 
     @staticmethod
     def get_session(item_id: int):
+        maybe_slow_db()  # 👈 CHAOS HOOK
+
         if item_id <= 500000:
             return Shard1Session()
         return Shard2Session()

@@ -23,6 +23,7 @@ from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.operaciones import router as operaciones_router
 from app.api.v1.endpoints.sagas import router as sagas_router
 from app.api.v1.endpoints.usuarios import router as usuarios_router
+from app.api.v1.endpoints.chaos import router as chaos_router  # 👈 NUEVO
 from app.api.v2 import api_router_v2
 from app.api.version import router as version_router
 
@@ -72,6 +73,7 @@ from app.middlewares.threat_detection import ThreatDetectionMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
 from app.middlewares.backpressure import BackpressureMiddleware
 from app.middlewares.priority import PriorityMiddleware
+from app.middlewares.chaos import ChaosMiddleware
 
 from app.oauth.router import router as oauth_router
 from app.routers.categorias import router as categorias_router
@@ -164,20 +166,19 @@ def create_app() -> FastAPI:
     app.add_middleware(TraceIdMiddleware)
     app.add_middleware(ELKLoggingMiddleware)
     app.add_middleware(SentryUserMiddleware)
+    app.add_middleware(ChaosMiddleware)
 
     # =================================================
     # STARTUP
     # =================================================
     @app.on_event("startup")
     async def startup_tasks():
-        # 🔥 DB INIT
         try:
             await asyncio.to_thread(Base.metadata.create_all, bind=engine)
             logger.info("DB inicializada correctamente")
         except Exception as exc:
             logger.warning(f"Error inicializando DB: {exc}")
 
-        # 🔥 MÉTRICAS (YA CON TABLAS)
         try:
             db = SessionLocal()
             try:
@@ -188,14 +189,12 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning(f"Error inicializando métricas: {exc}")
 
-        # 🔥 ELASTICSEARCH
         try:
             await asyncio.to_thread(create_index)
             logger.info("Elasticsearch index verificado/creado")
         except Exception as exc:
             logger.warning(f"Error creando índice Elasticsearch: {exc}")
 
-        # 🔥 CONSUL
         if settings.CONSUL_ENABLED:
             service_id = register_service(
                 name=settings.SERVICE_NAME,
@@ -255,6 +254,9 @@ def create_app() -> FastAPI:
     app.include_router(usuarios_router, prefix="/api/v1/usuarios")
     app.include_router(oauth_router)
     app.include_router(debug_router, prefix="/debug")
+
+    # 👇 CHAOS ROUTER (FIX)
+    app.include_router(chaos_router, prefix="/api/v1")
 
     # =================================================
     # METRICS
