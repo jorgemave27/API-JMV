@@ -1,36 +1,38 @@
 from __future__ import annotations
 
 """
-🔥 BACKPRESSURE MIDDLEWARE
+BACKPRESSURE MIDDLEWARE (SAFE VERSION)
 
-Controla cuántos requests concurrentes hay en el sistema.
+Controla requests concurrentes.
 
-Si hay demasiados:
-→ responde 503 (servidor saturado)
-
-🔥 IMPORTANTE:
-- No rompe si Redis falla
-- No afecta tests
+✔ No rompe si Redis falla
+✔ No rompe en Docker
+✔ No fuga contadores
+✔ Async correcto
 """
+
+import logging
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from fastapi import Request
 
 from app.core.redis_client import get_redis_client
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
 MAX_QUEUE = 1000
 RETRY_AFTER_SECONDS = 2
 
 
 class BackpressureMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
+    async def dispatch(self, request: Request, call_next):
 
-        # --------------------------------------------------
-        # 🔥 NO ejecutar en TESTING
-        # --------------------------------------------------
-        if getattr(settings, "TESTING", False):
+        # ==============================
+        # DESACTIVAR EN TESTING / DEV
+        # ==============================
+        if getattr(settings, "TESTING", False) or settings.APP_ENV != "production":
             return await call_next(request)
 
         redis = None
@@ -38,27 +40,32 @@ class BackpressureMiddleware(BaseHTTPMiddleware):
         incremented = False
 
         try:
-            # --------------------------------------------------
-            # 🔥 Obtener Redis (seguro)
-            # --------------------------------------------------
+            # ==============================
+            # OBTENER REDIS (SEGURO)
+            # ==============================
             try:
                 redis = await get_redis_client()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[BACKPRESSURE] Redis no disponible: {e}")
                 return await call_next(request)
 
-            # --------------------------------------------------
-            # 🔥 Incrementar contador
-            # --------------------------------------------------
+            # ==============================
+            # INCREMENTAR CONTADOR
+            # ==============================
             try:
                 current = await redis.incr(key)
                 incremented = True
+
+                # TTL para evitar fugas si algo truena
                 await redis.expire(key, 10)
-            except Exception:
+
+            except Exception as e:
+                logger.warning(f"[BACKPRESSURE] Error incrementando contador: {e}")
                 return await call_next(request)
 
-            # --------------------------------------------------
-            # 🔥 Saturación
-            # --------------------------------------------------
+            # ==============================
+            # SATURACIÓN
+            # ==============================
             if current > MAX_QUEUE:
 
                 if incremented:
@@ -72,24 +79,29 @@ class BackpressureMiddleware(BaseHTTPMiddleware):
                     content={
                         "success": False,
                         "message": "Servidor saturado",
-                        "data": None,
-                        "metadata": {},
+                        "data": {},
+                        "metadata": {"errors": []},
                     },
                     headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
                 )
 
-            # --------------------------------------------------
-            # 🔥 Continuar request
-            # --------------------------------------------------
-            response = await call_next(request)
-            return response
+            # ==============================
+            # CONTINUAR REQUEST
+            # ==============================
+            try:
+                response = await call_next(request)
+                return response
+
+            except Exception as e:
+                logger.error(f"[BACKPRESSURE] Error en request: {e}")
+                raise  # 🔥 importante: no ocultar errores reales
 
         finally:
-            # --------------------------------------------------
-            # 🔥 Decrementar seguro
-            # --------------------------------------------------
+            # ==============================
+            # DECREMENTO SEGURO
+            # ==============================
             if redis and incremented:
                 try:
                     await redis.decr(key)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[BACKPRESSURE] Error decrementando: {e}")

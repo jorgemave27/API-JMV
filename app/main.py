@@ -157,27 +157,46 @@ def create_app() -> FastAPI:
         )
 
     # ==============================
-    # MIDDLEWARES
+    # MIDDLEWARES (ORDEN CORRECTO)
     # ==============================
-    app.add_middleware(PriorityMiddleware)
-    #--app.add_middleware(BackpressureMiddleware)
-    app.add_middleware(SlowAPIMiddleware)
-    app.add_middleware(AuditContextMiddleware)
-    #--app.add_middleware(ThreatDetectionMiddleware)
-    app.add_middleware(ContentTypeValidationMiddleware)
-    app.add_middleware(DynamicCORSMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(AutoProfilerMiddleware)
+
+    #--IDENTIDAD Y TRACE (SIEMPRE PRIMERO)
     app.add_middleware(RequestIdMiddleware)
-    app.add_middleware(SQLInjectionWarningMiddleware)
-    #--app.add_middleware(SecurityAnomalyMiddleware)
     app.add_middleware(TraceIdMiddleware)
+
+    #--SEGURIDAD BÁSICA
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(ContentTypeValidationMiddleware)
+
+    #--CORS
+    app.add_middleware(DynamicCORSMiddleware)
+
+    #--RATE LIMIT (ANTES DE LOGGING)
+    app.add_middleware(SlowAPIMiddleware)
+
+    #--CONTEXTO
+    app.add_middleware(AuditContextMiddleware)
+
+    #--LOGGING (DESPUÉS DE TODO LO ANTERIOR)
+    app.add_middleware(RequestLoggingMiddleware)
+
+    #--SQL / VALIDACIONES
+    app.add_middleware(SQLInjectionWarningMiddleware)
+
+    #--OBSERVABILIDAD (PUEDEN FALLAR)
     app.add_middleware(ELKLoggingMiddleware)
     app.add_middleware(SentryUserMiddleware)
 
+    #--PROFILER (OPCIONAL)
+    app.add_middleware(AutoProfilerMiddleware)
+
+    #--PRIORITY (AL FINAL)
+    app.add_middleware(PriorityMiddleware)
+
+    #--CHAOS SOLO EN NO TEST
     if not getattr(settings, "TESTING", False):
         app.add_middleware(ChaosMiddleware)
+
 
     # ==============================
     # EXCEPTIONS
