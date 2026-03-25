@@ -49,6 +49,8 @@ from app.api.v1.endpoints.items_imagen import router as items_imagen_router
 
 from app.api.v1.endpoints.notificaciones import router as notif_router
 
+from app.api.v1.endpoints.pagos import router as pagos_router
+
 # =====================================================
 # ROUTER PRINCIPAL DE LA API V1
 # =====================================================
@@ -185,4 +187,12 @@ api_router_v1.include_router(
     tags=["Items Imagen"],
 )
 
+#--NOTIFICACIONES
 api_router_v1.include_router(notif_router)
+
+#--PAGOS
+api_router_v1.include_router(
+    pagos_router,
+    tags=["Pagos"],
+)
+

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 """
-TAREA 103
 Retención automática de datos personales (GDPR / LFPDPPP)
 
 Regla:

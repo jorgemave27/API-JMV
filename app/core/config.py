@@ -210,6 +210,11 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+    # =====================================================
+    # STRIPE
+    # =====================================================
+    STRIPE_SECRET_KEY: str = "sk_test_xxx"
+    STRIPE_WEBHOOK_SECRET: str = "whsec_xxx"
 
     # -------------------------------------------------
     # Helpers
