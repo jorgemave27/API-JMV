@@ -12,20 +12,26 @@ from app.schemas.domain_event import DomainEvent
 logger = logging.getLogger(__name__)
 
 
-async def _publish_event_async(event: DomainEvent) -> None:
-    """
-    Publica un evento en Kafka usando AIOKafkaProducer.
+# =========================================================
+# 🔥 FIX ASYNC GLOBAL
+# =========================================================
+def safe_async_run(coro):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        asyncio.run(coro)
 
-    Nota:
-    - Se crea un producer por publicación para mantener la integración simple
-      y compatible con endpoints sync actuales.
-    - Más adelante se puede optimizar con un producer persistente en lifespan.
-    """
+
+# =========================================================
+# ASYNC PRODUCER
+# =========================================================
+async def _publish_event_async(event: DomainEvent) -> None:
     producer = AIOKafkaProducer(
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
         client_id=settings.KAFKA_CLIENT_ID,
-        value_serializer=lambda value: json.dumps(value, default=str).encode("utf-8"),
-        key_serializer=lambda key: key.encode("utf-8") if key else None,
+        value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+        key_serializer=lambda k: k.encode("utf-8") if k else None,
     )
 
     try:
@@ -41,48 +47,22 @@ async def _publish_event_async(event: DomainEvent) -> None:
         try:
             await producer.stop()
         except Exception:
-            logger.exception("Error al cerrar Kafka producer")
+            logger.exception("Error cerrando Kafka producer")
 
 
+# =========================================================
+# PUBLIC API (FIX)
+# =========================================================
 def publish_domain_event(event: DomainEvent) -> None:
     """
-    Publica un evento de dominio en Kafka de forma segura.
-
-    Diseño:
-    - Si Kafka falla, NO rompe la operación principal del endpoint.
-    - Solo deja traza en logs.
-    - Esto mantiene la UX y los tests estables.
-
-    Importante:
-    - Esta versión usa asyncio.run porque tus endpoints actuales
-      son principalmente síncronos (`def`).
+    🔥 FIX:
+    - NO usa asyncio.run directamente
+    - NO rompe FastAPI
     """
     if not settings.KAFKA_ENABLED:
-        logger.info(
-            "Kafka deshabilitado por configuración. Evento omitido.",
-            extra={"event_type": event.event_type},
-        )
         return
 
     try:
-        asyncio.run(_publish_event_async(event))
-        logger.info(
-            "Evento publicado en Kafka",
-            extra={
-                "event_id": event.event_id,
-                "event_type": event.event_type,
-                "aggregate_type": event.aggregate_type,
-                "aggregate_id": event.aggregate_id,
-                "topic": settings.KAFKA_EVENTS_TOPIC,
-            },
-        )
+        safe_async_run(_publish_event_async(event))  # 🔥 FIX REAL
     except Exception as exc:
-        logger.warning(
-            "No se pudo publicar evento en Kafka: %s",
-            exc,
-            extra={
-                "event_type": event.event_type,
-                "aggregate_id": event.aggregate_id,
-                "topic": settings.KAFKA_EVENTS_TOPIC,
-            },
-        )
+        logger.warning("Kafka no disponible: %s", exc)

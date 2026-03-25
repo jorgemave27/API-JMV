@@ -45,6 +45,8 @@ from app.api.v1.endpoints.security_txt import router as security_txt_router
 # Gestión de usuarios
 from app.api.v1.endpoints.usuarios import router as usuarios_router
 
+from app.api.v1.endpoints.items_imagen import router as items_imagen_router
+
 # =====================================================
 # ROUTER PRINCIPAL DE LA API V1
 # =====================================================
@@ -173,4 +175,10 @@ api_router_v1.include_router(openid_router)
 api_router_v1.include_router(
     gdpr.router,
     tags=["GDPR"],
+)
+
+
+api_router_v1.include_router(
+    items_imagen_router,
+    tags=["Items Imagen"],
 )

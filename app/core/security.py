@@ -1,6 +1,5 @@
 # =====================================================
 # Ruta: app/core/security.py
-# VERSION FINAL CORREGIDA - TAREA 77
 # =====================================================
 
 from __future__ import annotations

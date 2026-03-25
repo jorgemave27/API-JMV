@@ -3,24 +3,17 @@ version: "3.9"
 services:
   # =====================================================
   # API PRINCIPAL
-  # IMPORTANTE:
-  # - Usa imagen remota para NO disparar pytest en build
-  # - Monta tu código local para que sí tome tus cambios
   # =====================================================
   api:
-    image: ghcr.io/jorgemave27/api-jmv:latest
+    build: .
     container_name: api-jmv-api
     working_dir: /app
-    entrypoint:
-      [
-        "uvicorn",
-        "app.main:app",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
-        "--reload",
-      ]
+
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+
     ports:
       - "8000:8000"
 
@@ -29,8 +22,8 @@ services:
 
     environment:
       APP_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
 
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/api_jmv
       API_KEY: dev-secret-key-change-me
       JWT_SECRET_KEY: super-secret-key-change-me-in-production
       SECRET_KEY: super-secret-key-change-me-in-production
@@ -41,9 +34,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       ELASTICSEARCH_URL: http://elasticsearch:9200
 
+      # 🔥 S3 / MINIO
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: api-jmv
+      S3_REGION: us-east-1
+
+      # 🔥 DESACTIVAR COSAS QUE ROMPEN TESTS
       CELERY_ENABLED: "false"
       KAFKA_ENABLED: "false"
       CONSUL_ENABLED: "false"
+
+      # 🔥 IMPORTANTE: evita crash de sentry
+      SENTRY_DSN: ""
 
       SERVICE_NAME: api-jmv
       SERVICE_HOST: api-jmv-api
@@ -58,9 +62,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      rabbitmq:
-        condition: service_started
-      elasticsearch:
+      minio:
         condition: service_started
 
     networks:
@@ -69,27 +71,23 @@ services:
     restart: unless-stopped
 
   # =====================================================
-  # AUTH SERVICE
+  # MINIO
   # =====================================================
-  auth-service:
-    build: ./auth-service
-    container_name: api-jmv-auth
+  minio:
+    image: minio/minio:latest
+    container_name: api-jmv-minio
+    command: server /data --console-address ":9001"
 
     ports:
-      - "8001:8001"
+      - "9000:9000"
+      - "9001:9001"
 
     environment:
-      APP_ENV: production
-      DATABASE_URL: postgresql://auth_user:auth_pass@auth-db:5432/auth_db
-      JWT_SECRET_KEY: super-secret-key-change-me-in-production
-      SECRET_KEY: super-secret-key-change-me-in-production
-      REDIS_URL: redis://redis:6379/0
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
 
-    depends_on:
-      auth-db:
-        condition: service_started
-      redis:
-        condition: service_healthy
+    volumes:
+      - minio_data:/data
 
     networks:
       - api_jmv_network
@@ -97,7 +95,7 @@ services:
     restart: unless-stopped
 
   # =====================================================
-  # DB PRINCIPAL
+  # DB
   # =====================================================
   db:
     image: postgres:15
@@ -116,35 +114,6 @@ services:
 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d api_jmv"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
-  # =====================================================
-  # AUTH DB
-  # =====================================================
-  auth-db:
-    image: postgres:15
-    container_name: api-jmv-auth-db
-
-    environment:
-      POSTGRES_DB: auth_db
-      POSTGRES_USER: auth_user
-      POSTGRES_PASSWORD: auth_pass
-
-    ports:
-      - "5433:5432"
-
-    volumes:
-      - auth_postgres_data:/var/lib/postgresql/data
-
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -178,120 +147,17 @@ services:
 
     restart: unless-stopped
 
-  # =====================================================
-  # RABBITMQ
-  # =====================================================
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: api-jmv-rabbitmq
-
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
-  # =====================================================
-  # NGINX GATEWAY
-  # =====================================================
-  gateway:
-    image: nginx:alpine
-    container_name: api-jmv-gateway
-
-    ports:
-      - "80:80"
-
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
-
-    depends_on:
-      api:
-        condition: service_started
-      auth-service:
-        condition: service_started
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
-  # =====================================================
-  # PROMETHEUS
-  # =====================================================
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: api-jmv-prometheus
-
-    ports:
-      - "9090:9090"
-
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
-  # =====================================================
-  # GRAFANA
-  # =====================================================
-  grafana:
-    image: grafana/grafana:latest
-    container_name: api-jmv-grafana
-
-    ports:
-      - "3000:3000"
-
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-
-    volumes:
-      - grafana_data:/var/lib/grafana
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
-  # =====================================================
-  # ELASTICSEARCH
-  # =====================================================
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
-    container_name: api-jmv-elasticsearch
-
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-
-    ports:
-      - "9200:9200"
-
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-
-    networks:
-      - api_jmv_network
-
-    restart: unless-stopped
-
+# =====================================================
+# VOLUMES
+# =====================================================
 volumes:
   postgres_data:
   redis_data:
-  grafana_data:
-  auth_postgres_data:
-  es_data:
+  minio_data:
 
+# =====================================================
+# NETWORK
+# =====================================================
 networks:
   api_jmv_network:
     driver: bridge

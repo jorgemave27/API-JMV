@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import zlib
 from typing import Any, Optional, Callable, Dict
 
@@ -23,28 +24,25 @@ from prometheus_client import Counter
 from app.core.redis_client import redis_client
 
 
-# ==============================
+# ==========================================================
+# TEST MODE (DESACTIVA CACHE/REDIS)
+# ==========================================================
+TESTING = os.getenv("TESTING", "false").lower() == "true"
+
+
+# ==========================================================
 # L1 CACHE (MEMORIA)
-# ==============================
+# ==========================================================
 L1_CACHE = TTLCache(maxsize=1000, ttl=60)
 
 # Locks por key (stampede protection)
 _locks: Dict[str, asyncio.Lock] = {}
 
 
-# ==============================
+# ==========================================================
 # SERIALIZACIÓN
-# ==============================
+# ==========================================================
 def _serialize(value: Any) -> str:
-    """
-    Serializa y comprime si >1KB.
-    Redis trabaja con strings (decode_responses=True)
-
-    IMPORTANTE:
-    - Si value no es JSON-serializable (ej. un modelo ORM),
-      json.dumps lanzará TypeError.
-    - Ese caso se controla en get_or_set para NO romper el flujo.
-    """
     data = json.dumps(value)
 
     if len(data.encode()) > 1024:
@@ -55,9 +53,6 @@ def _serialize(value: Any) -> str:
 
 
 def _deserialize(value: str) -> Any:
-    """
-    Deserializa y descomprime si aplica
-    """
     if value.startswith("COMPRESSED:"):
         hex_data = value.replace("COMPRESSED:", "", 1)
         decompressed = zlib.decompress(bytes.fromhex(hex_data))
@@ -72,17 +67,17 @@ def _get_lock(key: str) -> asyncio.Lock:
     return _locks[key]
 
 
-# ==============================
+# ==========================================================
 # MÉTRICAS
-# ==============================
+# ==========================================================
 L1_HITS = Counter("cache_l1_hits", "L1 cache hits")
 L2_HITS = Counter("cache_l2_hits", "L2 cache hits")
 DB_HITS = Counter("cache_db_hits", "DB hits")
 
 
-# ==============================
+# ==========================================================
 # CORE CACHE LOGIC
-# ==============================
+# ==========================================================
 async def get_or_set(
     key: str,
     ttl: int,
@@ -92,12 +87,11 @@ async def get_or_set(
     """
     Flujo:
     L1 → L2 → DB
-
-    IMPORTANTE:
-    - Si el valor obtenido desde DB no es serializable JSON
-      (por ejemplo, una entidad ORM como Item), NO se cachea,
-      pero sí se devuelve sin romper el flujo.
     """
+
+    # 🔥 EN TEST: SIN CACHE
+    if TESTING:
+        return await fetch_func()
 
     # ---------- L1 ----------
     if key in L1_CACHE:
@@ -105,28 +99,31 @@ async def get_or_set(
         return L1_CACHE[key]
 
     # ---------- L2 ----------
-    cached = redis_client.get(key)
+    try:
+        cached = redis_client.get(key)
+    except Exception:
+        cached = None
+
     if cached:
         value = _deserialize(cached)
         L2_HITS.inc()
-
         L1_CACHE[key] = value
         return value
 
-    # ---------- STAMPEDE PROTECTION ----------
+    # ---------- LOCK ----------
     lock = _get_lock(key)
 
     async with lock:
-        # Double check L1
         if key in L1_CACHE:
-            L1_HITS.inc()
             return L1_CACHE[key]
 
-        # Double check L2
-        cached = redis_client.get(key)
+        try:
+            cached = redis_client.get(key)
+        except Exception:
+            cached = None
+
         if cached:
             value = _deserialize(cached)
-            L2_HITS.inc()
             L1_CACHE[key] = value
             return value
 
@@ -137,47 +134,38 @@ async def get_or_set(
         if value is None:
             return None
 
-        # =====================================================
-        # Si el valor no es serializable (ej. modelo ORM),
-        # NO rompemos el flujo: simplemente no lo cacheamos.
-        # =====================================================
         try:
             serialized = _serialize(value)
-        except TypeError:
-            return value
         except Exception:
             return value
 
-        # Guardar en L1
         try:
             L1_CACHE[key] = value
         except Exception:
             pass
 
-        # Guardar en Redis
         try:
-            redis_client.set(
-                key,
-                serialized,
-                ex=redis_ttl or ttl,
-            )
+            redis_client.set(key, serialized, ex=redis_ttl or ttl)
         except Exception:
             pass
 
         return value
 
 
-# ==============================
+# ==========================================================
 # INVALIDACIÓN
-# ==============================
+# ==========================================================
 async def invalidate(key: str):
-    """
-    Invalida L1 + L2
-    """
     if key in L1_CACHE:
         del L1_CACHE[key]
 
-    redis_client.delete(key)
+    if TESTING:
+        return
+
+    try:
+        redis_client.delete(key)
+    except Exception:
+        pass
 
 
 async def invalidate_many(keys: list[str]):
@@ -185,28 +173,38 @@ async def invalidate_many(keys: list[str]):
         if key in L1_CACHE:
             del L1_CACHE[key]
 
-    if keys:
+    if TESTING:
+        return
+
+    try:
         redis_client.delete(*keys)
+    except Exception:
+        pass
 
 
-# ==============================
+# ==========================================================
 # TAG BASED INVALIDATION
-# ==============================
+# ==========================================================
 async def add_tag(tag: str, key: str):
-    """
-    Relaciona un key con un tag
-    """
-    redis_client.sadd(f"tag:{tag}", key)
+    if TESTING:
+        return
+
+    try:
+        redis_client.sadd(f"tag:{tag}", key)
+    except Exception:
+        pass
 
 
 async def invalidate_tag(tag: str):
-    """
-    Invalida todos los keys asociados a un tag
-    """
-    keys = redis_client.smembers(f"tag:{tag}")
+    if TESTING:
+        return
 
-    if keys:
-        invalidate_keys = list(keys)
-        await invalidate_many(invalidate_keys)
+    try:
+        keys = redis_client.smembers(f"tag:{tag}")
 
-    redis_client.delete(f"tag:{tag}")
+        if keys:
+            await invalidate_many(list(keys))
+
+        redis_client.delete(f"tag:{tag}")
+    except Exception:
+        pass

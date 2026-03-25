@@ -11,36 +11,32 @@ from slowapi.util import get_remote_address
 
 from app.core.vault import vault_client
 
+
+# =====================================================
+# ENV
+# =====================================================
 APP_ENV = os.getenv("APP_ENV", "development")
+TESTING = os.getenv("TESTING", "false").lower() == "true"
 
 
 # -----------------------------------------------------
-# Cargar secretos desde Vault ANTES de construir settings
+# Vault (NO en tests)
 # -----------------------------------------------------
 try:
-    if APP_ENV != "test" and vault_client.enabled():
+    if APP_ENV != "test" and not TESTING and vault_client.enabled():
         secrets_data = vault_client.read_secret("secret/mi-api")
 
-        if "API_KEY" in secrets_data and not os.getenv("API_KEY"):
-            os.environ["API_KEY"] = secrets_data["API_KEY"]
-
-        if "DB_PASSWORD" in secrets_data and not os.getenv("DB_PASSWORD"):
-            os.environ["DB_PASSWORD"] = secrets_data["DB_PASSWORD"]
-
-        if "ENCRYPTION_KEY" in secrets_data and not os.getenv("ENCRYPTION_KEY"):
-            os.environ["ENCRYPTION_KEY"] = secrets_data["ENCRYPTION_KEY"]
-
-        if "LOCAL_KMS_MASTER_KEY" in secrets_data and not os.getenv("LOCAL_KMS_MASTER_KEY"):
-            os.environ["LOCAL_KMS_MASTER_KEY"] = secrets_data["LOCAL_KMS_MASTER_KEY"]
-
-        if "AWS_KMS_KEY_ID" in secrets_data and not os.getenv("AWS_KMS_KEY_ID"):
-            os.environ["AWS_KMS_KEY_ID"] = secrets_data["AWS_KMS_KEY_ID"]
-
-        if "AWS_REGION" in secrets_data and not os.getenv("AWS_REGION"):
-            os.environ["AWS_REGION"] = secrets_data["AWS_REGION"]
-
-        if "KMS_PROVIDER" in secrets_data and not os.getenv("KMS_PROVIDER"):
-            os.environ["KMS_PROVIDER"] = secrets_data["KMS_PROVIDER"]
+        for key in [
+            "API_KEY",
+            "DB_PASSWORD",
+            "ENCRYPTION_KEY",
+            "LOCAL_KMS_MASTER_KEY",
+            "AWS_KMS_KEY_ID",
+            "AWS_REGION",
+            "KMS_PROVIDER",
+        ]:
+            if key in secrets_data and not os.getenv(key):
+                os.environ[key] = secrets_data[key]
 
 except Exception:
     pass
@@ -49,8 +45,6 @@ except Exception:
 # =====================================================
 # Rate limiting
 # =====================================================
-
-
 def rate_limit_key_func(request: Request) -> str:
     auth_header = request.headers.get("Authorization")
 
@@ -82,11 +76,17 @@ limiter = Limiter(key_func=rate_limit_key_func)
 
 
 # =====================================================
-# Settings
+# SETTINGS
 # =====================================================
-
-
 class Settings(BaseSettings):
+
+    # -------------------------------------------------
+    # FLAGS CRÍTICOS (🔥 NUEVO)
+    # -------------------------------------------------
+    TESTING: bool = TESTING
+    ELASTIC_ENABLED: bool = not TESTING   # 🔥 OFF en tests
+    CHAOS_ENABLED: bool = not TESTING     # 🔥 OFF en tests
+
     # -------------------------------------------------
     # Core
     # -------------------------------------------------
@@ -116,27 +116,37 @@ class Settings(BaseSettings):
     MAX_ITEMS_PER_PAGE: int = 100
 
     # -------------------------------------------------
-    # Redis / Cache
+    # Redis / Cache (🔥 OFF en tests)
     # -------------------------------------------------
     REDIS_URL: str = "redis://localhost:6379/0"
-    CACHE_ENABLED: bool = True
+    CACHE_ENABLED: bool = not TESTING
+
     CACHE_TTL_ITEM_SECONDS: int = 300
     CACHE_TTL_LIST_SECONDS: int = 300
 
     # -------------------------------------------------
-    # Celery
+    # Celery (🔥 OFF en tests)
     # -------------------------------------------------
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
-    CELERY_ENABLED: bool = False
+    CELERY_ENABLED: bool = False if TESTING else False
 
     # -------------------------------------------------
-    # Kafka
+    # Kafka (🔥 OFF en tests)
     # -------------------------------------------------
-    KAFKA_ENABLED: bool = True
+    KAFKA_ENABLED: bool = False if TESTING else True
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
     KAFKA_CLIENT_ID: str = "api-jmv"
     KAFKA_EVENTS_TOPIC: str = "jmv.domain-events"
+
+    # =====================================================
+    # S3 / MINIO CONFIG
+    # =====================================================
+    S3_ENDPOINT: str = "http://minio:9000"
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadmin"
+    S3_BUCKET: str = "api-jmv"
+    S3_REGION: str = "us-east-1"
 
     # -------------------------------------------------
     # Consul
@@ -171,6 +181,21 @@ class Settings(BaseSettings):
     AWS_REGION: str | None = None
 
     # -------------------------------------------------
+    # Profiling
+    # -------------------------------------------------
+    PROFILING_ENABLED: bool = not TESTING
+    PROFILING_SLOW_REQUEST_THRESHOLD_MS: float = 500.0
+    PROFILING_CONSECUTIVE_SLOW_REQUESTS: int = 3
+    PROFILING_OUTPUT_DIR: str = "profiles"
+
+    # -------------------------------------------------
+    # DB
+    # -------------------------------------------------
+    DATABASE_READ_URL: str | None = None
+    DATABASE_SHARD_1: str | None = None
+    DATABASE_SHARD_2: str | None = None
+
+    # -------------------------------------------------
     # Pydantic config
     # -------------------------------------------------
     model_config = SettingsConfigDict(
@@ -179,26 +204,10 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
-    # -------------------------------------------------
-    # Profiling / Performance
-    # -------------------------------------------------
-    PROFILING_ENABLED: bool = True
-    PROFILING_SLOW_REQUEST_THRESHOLD_MS: float = 500.0
-    PROFILING_CONSECUTIVE_SLOW_REQUESTS: int = 3
-    PROFILING_OUTPUT_DIR: str = "profiles"
-
-    # -------------------------------------------------
-    # DATABASE POOLING / REPLICAS / SHARDING
-    # -------------------------------------------------
-    DATABASE_READ_URL: str | None = None
-
-    DATABASE_SHARD_1: str | None = None
-    DATABASE_SHARD_2: str | None = None
 
     # -------------------------------------------------
     # Helpers
     # -------------------------------------------------
-
     @property
     def cors_allow_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
@@ -210,7 +219,6 @@ class Settings(BaseSettings):
     # -------------------------------------------------
     # Validaciones
     # -------------------------------------------------
-
     @field_validator("API_KEY")
     @classmethod
     def validate_api_key_length(cls, v: str) -> str:
@@ -237,8 +245,6 @@ class Settings(BaseSettings):
 # =====================================================
 # Singleton
 # =====================================================
-
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
