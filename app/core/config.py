@@ -216,6 +216,22 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = "sk_test_xxx"
     STRIPE_WEBHOOK_SECRET: str = "whsec_xxx"
 
+    # =====================================================
+    # OIDC / SSO (GOOGLE)
+    # =====================================================
+    GOOGLE_CLIENT_ID: str = "tu-client-id"
+    GOOGLE_CLIENT_SECRET: str = "tu-client-secret"
+    GOOGLE_DISCOVERY_URL: str = "https://accounts.google.com/.well-known/openid-configuration"
+
+    # Redirect URI (debe coincidir con Google Console)
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
+
+    # Group Sync Mapping (correo → rol)
+    SSO_GROUP_ROLE_MAPPING: dict[str, str] = {
+        "engineering@empresa.com": "editor",
+        "admin@empresa.com": "admin",
+    }
+
     # -------------------------------------------------
     # Helpers
     # -------------------------------------------------

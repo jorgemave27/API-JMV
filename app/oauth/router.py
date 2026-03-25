@@ -1,10 +1,12 @@
 """
-Endpoints OAuth2 Authorization Code Flow.
+Endpoints OAuth2 Authorization Code Flow + Google SSO (OIDC).
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.database.database import get_db
 from app.models.usuario import Usuario
@@ -14,8 +16,20 @@ from app.oauth.service import (
     revoke_refresh_token,
 )
 
-router = APIRouter(prefix="/oauth", tags=["OAuth2"])
+#SSO GOOGLE
+from app.oauth.google_sso import handle_google_callback
 
+
+# =====================================================
+# ROUTER
+# =====================================================
+
+router = APIRouter(prefix="/oauth", tags=["OAuth2 / SSO"])
+
+
+# =====================================================
+# OAUTH2 STANDARD FLOW
+# =====================================================
 
 @router.get("/authorize")
 def authorize(
@@ -90,4 +104,52 @@ def userinfo(current_user: Usuario = Depends(get_current_user)):
         "id": current_user.id,
         "email": current_user.email,
         "role": current_user.rol,
+    }
+
+
+# =====================================================
+# GOOGLE SSO (OIDC)
+# =====================================================
+
+@router.get("/google")
+async def google_login():
+    """
+    🔐 Redirige al usuario a Google para autenticación SSO.
+    """
+
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={settings.GOOGLE_CLIENT_ID}"
+        f"&response_type=code"
+        f"&scope=openid email profile"
+        f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
+        f"&access_type=offline"
+        f"&prompt=consent"
+    )
+
+    return RedirectResponse(google_auth_url)
+
+
+@router.get("/google/callback")
+async def google_callback(
+    code: str,
+    db: Session = Depends(get_db),
+):
+    """
+     Callback de Google.
+
+    Flujo:
+    1. Recibe authorization code
+    2. Intercambia por ID Token
+    3. Verifica token (JWKS)
+    4. JIT provisioning (crea usuario si no existe)
+    5. Aplica Group Sync → rol
+    6. Genera JWT propio de la API
+    """
+
+    access_token = await handle_google_callback(db, code)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
     }

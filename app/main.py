@@ -47,12 +47,12 @@ from app.middlewares.dynamic_cors import DynamicCORSMiddleware
 from app.middlewares.elk_logging import ELKLoggingMiddleware
 from app.middlewares.request_id import RequestIdMiddleware
 from app.middlewares.request_logging import RequestLoggingMiddleware
-#--from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
+from app.middlewares.security_anomaly import SecurityAnomalyMiddleware
 from app.middlewares.security_headers import SecurityHeadersMiddleware
 from app.middlewares.sql_injection_warning import SQLInjectionWarningMiddleware
-#--from app.middlewares.threat_detection import ThreatDetectionMiddleware
+from app.middlewares.threat_detection import ThreatDetectionMiddleware
 from app.middlewares.trace_id import TraceIdMiddleware
-#--from app.middlewares.backpressure import BackpressureMiddleware
+from app.middlewares.backpressure import BackpressureMiddleware
 from app.middlewares.priority import PriorityMiddleware
 from app.middlewares.chaos import ChaosMiddleware
 
