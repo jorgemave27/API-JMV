@@ -87,7 +87,7 @@ class ItemRead(HateoasResponse):
     eliminado: bool
     eliminado_en: Optional[datetime] = None
 
-    # 🔥🔥🔥 FIX CLAVE (ESTO TE FALTABA)
+    
     imagen_url: Optional[str] = None
 
 

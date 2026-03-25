@@ -81,14 +81,14 @@ limiter = Limiter(key_func=rate_limit_key_func)
 class Settings(BaseSettings):
 
     # -------------------------------------------------
-    # FLAGS CRÍTICOS (🔥 NUEVO)
+    # FLAGS CRÍTICOS
     # -------------------------------------------------
     TESTING: bool = TESTING
-    ELASTIC_ENABLED: bool = not TESTING   # 🔥 OFF en tests
-    CHAOS_ENABLED: bool = not TESTING     # 🔥 OFF en tests
+    ELASTIC_ENABLED: bool = not TESTING
+    CHAOS_ENABLED: bool = not TESTING
 
     # -------------------------------------------------
-    # Core
+    # Core (OBLIGATORIOS)
     # -------------------------------------------------
     DATABASE_URL: str
     API_KEY: str
@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     MAX_ITEMS_PER_PAGE: int = 100
 
     # -------------------------------------------------
-    # Redis / Cache (🔥 OFF en tests)
+    # Redis / Cache
     # -------------------------------------------------
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_ENABLED: bool = not TESTING
@@ -125,14 +125,14 @@ class Settings(BaseSettings):
     CACHE_TTL_LIST_SECONDS: int = 300
 
     # -------------------------------------------------
-    # Celery (🔥 OFF en tests)
+    # Celery
     # -------------------------------------------------
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     CELERY_ENABLED: bool = False if TESTING else False
 
     # -------------------------------------------------
-    # Kafka (🔥 OFF en tests)
+    # Kafka
     # -------------------------------------------------
     KAFKA_ENABLED: bool = False if TESTING else True
     KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
@@ -187,6 +187,12 @@ class Settings(BaseSettings):
     PROFILING_SLOW_REQUEST_THRESHOLD_MS: float = 500.0
     PROFILING_CONSECUTIVE_SLOW_REQUESTS: int = 3
     PROFILING_OUTPUT_DIR: str = "profiles"
+
+    # =====================================================
+    # SENDGRID CONFIG (🔥 FIX)
+    # =====================================================
+    SENDGRID_API_KEY: str = "dummy"
+    EMAIL_FROM: str = "noreply@api-jmv.com"
 
     # -------------------------------------------------
     # DB

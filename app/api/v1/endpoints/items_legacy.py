@@ -55,7 +55,7 @@ from app.services.metrics_service import (
 )
 from app.workers.tasks import enviar_notificacion
 from app.storage.s3_client import generate_presigned_url
-
+from app.notifications.notification_service import NotificationService
 # =========================================================
 # ELASTICSEARCH
 # =========================================================
@@ -274,17 +274,6 @@ async def crear_item(
     repo: ItemRepository = Depends(get_item_repo),
     current_user: Usuario = Depends(require_role("admin", "editor")),
 ):
-    """
-    Crea un item legacy e instrumenta métricas:
-    - create
-    - items creados por categoría
-    - latencia DB
-
-    IMPORTANTE:
-    - Aquí ya usamos await repo.create(...) para no devolver coroutines
-    - La invalidación del cache multinivel vive en el repository
-    - Se sincroniza Elasticsearch después de persistir en PostgreSQL
-    """
     _bind_audit_user(current_user)
 
     categoria = None
@@ -316,30 +305,76 @@ async def crear_item(
             item = await repo.create(item)
 
         # -------------------------------------------------
-        # Sincronización con Elasticsearch
+        # Elasticsearch
         # -------------------------------------------------
         try:
             es_index_item(item)
         except Exception as exc:
             logger.warning("No se pudo indexar item %s en Elasticsearch: %s", item.id, exc)
 
+        # -------------------------------------------------
+        # Métricas
+        # -------------------------------------------------
         category_name = categoria.nombre if categoria else "sin_categoria"
         ITEMS_CREATED_BY_CATEGORY.labels(category=category_name).inc()
         sync_active_items_gauge(db)
         increment_crud_operation("item", "create", "success")
 
-        # Se mantiene cache manual de listados legacy
+        # -------------------------------------------------
+        # Cache
+        # -------------------------------------------------
         invalidate_first_page_list_caches()
+
+        # =========================================================
+        #  NOTIFICACIÓN ITEM CREADO
+        # =========================================================
+        payload_notif = {
+            "destinatario": "admin@api-jmv.com",
+            "tipo": "item_creado",
+            "canal": "email",
+            "context": {
+                "subject": "Nuevo item creado",
+                "nombre": item.name,
+            }
+        }
 
         if settings.CELERY_ENABLED:
             try:
-                enviar_notificacion.delay(item.id, "admin@empresa.com")
+                enviar_notificacion.delay(payload_notif)
             except Exception as exc:
-                logger.warning(
-                    "No se pudo encolar tarea Celery enviar_notificacion: %s",
-                    exc,
-                )
+                logger.warning("Error enviando notificación: %s", exc)
+        else:
+            from app.database.database import SessionLocal
+            from app.notifications.notification_service import NotificationService
 
+            db_local = SessionLocal()
+            try:
+                NotificationService(db_local).send(**payload_notif)
+            finally:
+                db_local.close()
+
+        # =========================================================
+        # ALERTA STOCK BAJO
+        # =========================================================
+        if item.stock <= LOW_STOCK_THRESHOLD:
+
+            payload_stock = {
+                "destinatario": "admin@api-jmv.com",
+                "tipo": "stock_bajo",
+                "canal": "email",
+                "context": {
+                    "subject": "Stock bajo detectado",
+                    "nombre": item.name,
+                    "stock": item.stock,
+                }
+            }
+
+            if settings.CELERY_ENABLED:
+                enviar_notificacion.delay(payload_stock)
+
+        # -------------------------------------------------
+        # Eventos
+        # -------------------------------------------------
         _publicar_evento_item(
             "items.creado",
             ItemRead.model_validate(item).model_dump(mode="json"),

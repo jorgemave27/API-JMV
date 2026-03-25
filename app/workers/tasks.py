@@ -18,6 +18,9 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+# =====================================================
+# HELPERS GDPR
+# =====================================================
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -39,29 +42,54 @@ def _anon_rfc(rfc: str | None, user_id: int) -> str | None:
     return _sha256(f"{user_id}:{rfc}")
 
 
-@celery_app.task(name="app.workers.tasks.enviar_notificacion")
-def enviar_notificacion(item_id: int, email: str) -> dict:
-    logger.info(
-        "Iniciando envío de notificación para item_id=%s a email=%s",
-        item_id,
-        email,
-    )
+# =====================================================
+# 🔥 TASK NOTIFICACIONES (CORREGIDO)
+# =====================================================
+@celery_app.task(name="app.workers.tasks.enviar_notificacion", bind=True, max_retries=3)
+def enviar_notificacion(self, payload: dict) -> dict:
+    """
+    Nueva versión:
+    - Usa NotificationService
+    - Maneja DB correctamente
+    - Tiene retry con backoff
+    """
 
-    time.sleep(2)
+    db: Session = SessionLocal()
 
-    logger.info(
-        "Notificación enviada para item_id=%s a email=%s",
-        item_id,
-        email,
-    )
+    try:
+        from app.notifications.notification_service import NotificationService
 
-    return {
-        "item_id": item_id,
-        "email": email,
-        "status": "enviado",
-    }
+        service = NotificationService(db=db)
+
+        service.send(
+            destinatario=payload["destinatario"],
+            tipo=payload["tipo"],
+            canal=payload["canal"],
+            context=payload["context"],
+        )
+
+        logger.info("Notificación enviada correctamente: %s", payload)
+
+        return {
+            "status": "enviado",
+            "payload": payload,
+        }
+
+    except Exception as exc:
+        logger.error("Error en notificación: %s", exc, exc_info=True)
+
+        raise self.retry(
+            exc=exc,
+            countdown=2 ** self.request.retries
+        )
+
+    finally:
+        db.close()
 
 
+# =====================================================
+# STOCK REPORT
+# =====================================================
 @celery_app.task(name="app.workers.tasks.generar_reporte_stock_bajo")
 def generar_reporte_stock_bajo() -> dict:
     db: Session = SessionLocal()
@@ -116,18 +144,10 @@ def generar_reporte_stock_bajo() -> dict:
 
 
 # =====================================================
-# GDPR DATA RETENTION TASK
+# GDPR DATA RETENTION
 # =====================================================
-
-
 @celery_app.task(name="app.workers.tasks.anonimizar_usuarios_inactivos")
 def anonimizar_usuarios_inactivos() -> dict:
-    """
-    Anonimiza usuarios inactivos > 3 años.
-
-    Cumple GDPR / LFPDPPP.
-    """
-
     db: Session = SessionLocal()
 
     try:
