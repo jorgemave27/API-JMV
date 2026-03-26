@@ -38,3 +38,22 @@ override.tf.json
 # Terraform variables sensibles
 *.auto.tfvars
 secrets.tfvars
+
+# Logs
+*.log
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Test data (SFTP mock)
+test_data/
+
+# Coverage
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/

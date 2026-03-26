@@ -1,28 +1,29 @@
 from __future__ import annotations
 
 """
-Celery configuration for API-JMV.
+CELERY CONFIGURATION - API JMV
 
 Este módulo configura:
-- Celery worker
-- Celery Beat scheduler
-- Redis como broker y backend
-- Registro de tareas background
 
-Arquitectura actual del proyecto:
+✔ Celery Worker (procesamiento async)
+✔ Celery Beat (jobs programados)
+✔ Redis como broker/backend
+✔ Registro explícito de tareas
+
+Arquitectura:
 
 FastAPI
    │
    ├── Celery Worker
-   │       └── tareas async
+   │       └── tareas async (SFTP, notificaciones, etc)
    │
    ├── Celery Beat
-   │       └── tareas programadas
+   │       └── jobs programados (cron)
    │
    └── Redis
            ├── cache
-           ├── sessions
-           └── celery broker
+           ├── sesiones
+           └── broker Celery
 """
 
 # ==========================================================
@@ -34,12 +35,21 @@ from celery.schedules import crontab
 
 from app.core.config import settings
 
-# ----------------------------------------------------------
-# IMPORTAR TAREAS
-# ----------------------------------------------------------
-# IMPORTANTE:
-# Celery necesita importar las tareas para registrarlas.
+# ==========================================================
+# IMPORTACIÓN DE TAREAS (CRÍTICO)
+# ==========================================================
+"""
+IMPORTANTE:
+Celery SOLO registra tareas si son importadas.
+
+Si olvidas importar una tarea:
+❌ No aparece en worker
+❌ No se ejecuta en beat
+"""
+
 from app.tasks.data_retention import ejecutar_retencion_datos
+from app.tasks.sftp_integration_task import procesar_archivos_sftp
+
 
 # ==========================================================
 # CREACIÓN DE APP CELERY
@@ -51,47 +61,90 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
 )
 
+
 # ==========================================================
-# CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN GLOBAL
 # ==========================================================
 
 celery_app.conf.update(
-    # Serialización segura
+
+    # ------------------------------------------------------
+    # SERIALIZACIÓN SEGURA
+    # ------------------------------------------------------
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    # Zona horaria
+
+    # ------------------------------------------------------
+    # TIMEZONE
+    # ------------------------------------------------------
     timezone="UTC",
     enable_utc=True,
-    # Reintentos automáticos
-    task_acks_late=True,
-    # Evita duplicados si el worker cae
-    worker_prefetch_multiplier=1,
+
+    # ------------------------------------------------------
+    # CONFIABILIDAD
+    # ------------------------------------------------------
+    task_acks_late=True,          # Evita pérdida de tareas si worker cae
+    worker_prefetch_multiplier=1, # Evita duplicados
+
     # ======================================================
-    # CELERY BEAT (TAREAS PROGRAMADAS)
+    # CELERY BEAT (CRON JOBS)
     # ======================================================
     beat_schedule={
+
         # --------------------------------------------------
-        # TAREA 103
-        # Retención automática de datos personales
-        # GDPR / LFPDPPP
+        # GDPR DATA RETENTION
         # --------------------------------------------------
         "gdpr-data-retention-job": {
             "task": "app.tasks.data_retention.ejecutar_retencion_datos",
             "schedule": crontab(hour=3, minute=0),
         },
+
+        # --------------------------------------------------
+        # SFTP LEGACY INTEGRATION
+        # --------------------------------------------------
+        """
+        Este job:
+
+        1. Se conecta al SFTP
+        2. Descarga archivos EDI
+        3. Los parsea (CSV)
+        4. Inserta datos en el sistema
+        5. Genera respuesta
+        6. Mueve archivos:
+           - /procesados
+           - /cuarentena (errores)
+        """
+
+        "sftp-sync-job": {
+            "task": "app.tasks.sftp.process_files",
+            "schedule": crontab(minute=0),  # cada hora
+        },
     },
 )
 
-# ==========================================================
-# REGISTRO MANUAL DE TAREAS
-# ==========================================================
 
+# ==========================================================
+# WRAPPERS DE TAREAS (OPCIONAL PERO BUENA PRÁCTICA)
+# ==========================================================
 
 @celery_app.task(name="app.tasks.data_retention.ejecutar_retencion_datos")
 def celery_retention_job():
     """
-    Wrapper Celery para ejecutar el job de retención.
-    """
+    Wrapper para job de retención de datos.
 
+    Se ejecuta vía Celery Beat diariamente.
+    """
     ejecutar_retencion_datos()
+
+
+@celery_app.task(name="app.tasks.sftp.process_files")
+def celery_sftp_job():
+    """
+    Wrapper para integración SFTP.
+
+    IMPORTANTE:
+    - Este wrapper permite ejecutar la tarea desde Celery Beat
+    - Internamente delega a la lógica principal
+    """
+    procesar_archivos_sftp()
