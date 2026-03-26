@@ -62,7 +62,12 @@ from app.routers.categorias import router as categorias_router
 # ELASTICSEARCH
 from app.search.elasticsearch_client import create_index
 
+# STORAGE
 from app.storage.s3_client import create_bucket_if_not_exists
+
+# GRAPHQL
+from strawberry.fastapi import GraphQLRouter
+from app.graphql.schema import schema as graphql_schema
 
 # SERVICES
 from app.services.metrics_service import (
@@ -87,7 +92,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"DB error: {e}")
 
-    # 🔥 NUEVO: CREAR BUCKET
     try:
         create_bucket_if_not_exists()
         logger.info("S3 bucket OK")
@@ -138,7 +142,6 @@ def create_app() -> FastAPI:
     )
 
     sentry_sdk.set_tag("release", settings.VERSION)
-
     app.state.limiter = limiter
 
     # ==============================
@@ -157,53 +160,30 @@ def create_app() -> FastAPI:
         )
 
     # ==============================
-    # MIDDLEWARES (ORDEN CORRECTO)
+    # MIDDLEWARES
     # ==============================
-
-    #--IDENTIDAD Y TRACE (SIEMPRE PRIMERO)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(TraceIdMiddleware)
-
-    #--SEGURIDAD BÁSICA
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(ContentTypeValidationMiddleware)
-
-    #--CORS
     app.add_middleware(DynamicCORSMiddleware)
-
-    #--RATE LIMIT (ANTES DE LOGGING)
     app.add_middleware(SlowAPIMiddleware)
-
-    #--CONTEXTO
     app.add_middleware(AuditContextMiddleware)
-
-    #--LOGGING (DESPUÉS DE TODO LO ANTERIOR)
     app.add_middleware(RequestLoggingMiddleware)
-
-    #--SQL / VALIDACIONES
     app.add_middleware(SQLInjectionWarningMiddleware)
-
-    #--OBSERVABILIDAD (PUEDEN FALLAR)
     app.add_middleware(ELKLoggingMiddleware)
     app.add_middleware(SentryUserMiddleware)
-
-    #--PROFILER (OPCIONAL)
     app.add_middleware(AutoProfilerMiddleware)
-
-    #--PRIORITY (AL FINAL)
     app.add_middleware(PriorityMiddleware)
 
-    #--CHAOS SOLO EN NO TEST
     if not getattr(settings, "TESTING", False):
         app.add_middleware(ChaosMiddleware)
-
 
     # ==============================
     # EXCEPTIONS
     # ==============================
     def build_validation_response(exc: RequestValidationError):
         errors = []
-
         try:
             for e in exc.errors() or []:
                 errors.append({
@@ -217,9 +197,7 @@ def create_app() -> FastAPI:
         return {
             "success": False,
             "message": "Error de validación",
-            "data": {
-                "errors": errors  # 🔥 FIX CLAVE
-            },
+            "data": {"errors": errors},
             "metadata": {},
         }
 
@@ -268,7 +246,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-
         if isinstance(exc, RequestValidationError):
             return JSONResponse(
                 status_code=422,
@@ -284,6 +261,12 @@ def create_app() -> FastAPI:
                 "metadata": {"errors": []},
             },
         )
+
+    # ==============================
+    # GRAPHQL
+    # ==============================
+    graphql_app = GraphQLRouter(graphql_schema)
+    app.include_router(graphql_app, prefix="/graphql")
 
     # ==============================
     # ROUTERS
