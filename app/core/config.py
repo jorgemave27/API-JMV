@@ -189,10 +189,16 @@ class Settings(BaseSettings):
     PROFILING_OUTPUT_DIR: str = "profiles"
 
     # =====================================================
-    # SENDGRID CONFIG (🔥 FIX)
+    # SENDGRID CONFIG 
     # =====================================================
     SENDGRID_API_KEY: str = "dummy"
     EMAIL_FROM: str = "noreply@api-jmv.com"
+
+    # =====================================================
+    # OpenAI / LLMs
+    # =====================================================
+
+    OPENAI_API_KEY: str | None = None
 
     # -------------------------------------------------
     # DB

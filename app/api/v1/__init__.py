@@ -51,6 +51,8 @@ from app.api.v1.endpoints.notificaciones import router as notif_router
 
 from app.api.v1.endpoints.pagos import router as pagos_router
 
+from app.api.v1.endpoints.ai import router as ai_router
+
 # =====================================================
 # ROUTER PRINCIPAL DE LA API V1
 # =====================================================
@@ -196,3 +198,8 @@ api_router_v1.include_router(
     tags=["Pagos"],
 )
 
+
+api_router_v1.include_router(
+    ai_router,
+    tags=["AI"],
+)

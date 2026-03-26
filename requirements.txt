@@ -69,6 +69,7 @@ mdurl==0.1.2
 memory-profiler==0.61.0
 multidict==6.7.1
 nodeenv==1.10.0
+openai>=1.0.0
 packaging==26.0
 pact-python==3.2.1
 pact-python-cli==2.5.7.0
