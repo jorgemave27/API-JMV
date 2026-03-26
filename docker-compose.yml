@@ -41,12 +41,11 @@ services:
       S3_BUCKET: api-jmv
       S3_REGION: us-east-1
 
-      # 🔥 DESACTIVAR COSAS QUE ROMPEN TESTS
+      # 🔥 IMPORTANTE
       CELERY_ENABLED: "false"
       KAFKA_ENABLED: "false"
       CONSUL_ENABLED: "false"
 
-      # 🔥 IMPORTANTE: evita crash de sentry
       SENTRY_DSN: ""
 
       SERVICE_NAME: api-jmv
@@ -95,11 +94,17 @@ services:
     restart: unless-stopped
 
   # =====================================================
-  # DB
+  # POSTGRES (🔥 CDC ENABLED)
   # =====================================================
   db:
     image: postgres:15
     container_name: api-jmv-db
+
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_wal_senders=4
+      -c max_replication_slots=4
 
     environment:
       POSTGRES_DB: api_jmv
@@ -146,6 +151,53 @@ services:
       - api_jmv_network
 
     restart: unless-stopped
+
+  # =====================================================
+  # ZOOKEEPER
+  # =====================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: api-jmv-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - api_jmv_network
+
+  # =====================================================
+  # KAFKA
+  # =====================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: api-jmv-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - api_jmv_network
+
+  # =====================================================
+  # DEBEZIUM (KAFKA CONNECT)
+  # =====================================================
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: api-jmv-kafka-connect
+    depends_on:
+      - kafka
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: "1"
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+    networks:
+      - api_jmv_network
 
 # =====================================================
 # VOLUMES
